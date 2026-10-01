@@ -10,7 +10,13 @@ import {
   createDepartmentInSupabase,
   createTeamInSupabase,
   deleteDepartmentInSupabase,
-  deleteTeamInSupabase
+  deleteTeamInSupabase,
+  addEmployeeInSupabase,
+  updateMemberRoleInSupabase,
+  updateMemberDepartmentInSupabase,
+  removeMemberInSupabase,
+  createInvitationInSupabase,
+  acceptInvitationInSupabase
 } from './sync';
 import {
   Organization,
@@ -429,12 +435,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (wsData) {
         const resolvedUserId = wsData.user?.id || userId;
 
+        const myMem = wsData.memberships?.find(
+          (m: any) => m.user_id === resolvedUserId || m.user?.email?.toLowerCase() === userEmail.toLowerCase()
+        );
+        const resolvedRole: UserRole = myMem?.role || (wsData.organizations && wsData.organizations.length > 0 && wsData.organizations[0].created_by === resolvedUserId ? 'ORGANIZATION_OWNER' : 'TEAM_MEMBER');
+
         const userObj: User & { role: UserRole } = {
           id: resolvedUserId,
           email: userEmail,
           full_name: userFullName,
           avatar_url: userAvatar,
-          role: wsData.memberships?.[0]?.role || 'ORGANIZATION_OWNER',
+          role: resolvedRole,
           status: 'ACTIVE'
         };
 
@@ -510,13 +521,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             localStorage.setItem('crosstech_channels', JSON.stringify(wsData.channels));
           } catch {}
         }
+
+        if (wsData.invitations) {
+          setInvitations(wsData.invitations);
+          try {
+            localStorage.setItem('crosstech_invitations', JSON.stringify(wsData.invitations));
+          } catch {}
+        }
       } else {
         const fallbackUser: User & { role: UserRole } = {
           id: userId,
           email: userEmail,
           full_name: userFullName,
           avatar_url: userAvatar,
-          role: 'ORGANIZATION_OWNER',
+          role: 'TEAM_MEMBER',
           status: 'ACTIVE'
         };
         setCurrentUserState(fallbackUser);
@@ -645,6 +663,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (currentUser.id === userId) {
       setCurrentUserState(prev => ({ ...prev, role: newRole }));
     }
+
+    // Sync to Supabase
+    updateMemberRoleInSupabase(currentOrg.id, userId, newRole).catch(err => {
+      console.warn('Failed to update member role in Supabase:', err);
+    });
+
     setAuditLogs(prev => [
       {
         id: `aud_${Date.now()}`,
@@ -669,6 +693,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : m
       )
     );
+
+    // Sync to Supabase
+    updateMemberDepartmentInSupabase(currentOrg.id, userId, deptId, teamId).catch(err => {
+      console.warn('Failed to update member department in Supabase:', err);
+    });
+
     setAuditLogs(prev => [
       {
         id: `aud_${Date.now()}`,
@@ -690,6 +720,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setMemberships(prev =>
       prev.filter(m => !(m.user_id === userId && m.organization_id === currentOrg.id))
     );
+
+    // Sync to Supabase
+    removeMemberInSupabase(currentOrg.id, userId).catch(err => {
+      console.warn('Failed to remove member in Supabase:', err);
+    });
+
     setAuditLogs(prev => [
       {
         id: `aud_${Date.now()}`,
@@ -733,6 +769,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       joined_at: new Date().toISOString()
     };
     setMemberships(prev => [...prev, newMem]);
+
+    // Sync to Supabase
+    addEmployeeInSupabase({
+      orgId: currentOrg.id,
+      email: emp.email,
+      fullName: emp.full_name,
+      role: emp.role,
+      departmentId: emp.department_id,
+      teamId: emp.team_id
+    }).then(res => {
+      if (res?.dbUserId) {
+        setUsers(prev =>
+          prev.map(u => (u.email.toLowerCase() === emp.email.toLowerCase() ? { ...u, id: res.dbUserId } : u))
+        );
+        setMemberships(prev =>
+          prev.map(m => (m.user_id === newUserId ? { ...m, user_id: res.dbUserId } : m))
+        );
+      }
+    }).catch(err => {
+      console.warn('Failed to add employee in Supabase:', err);
+    });
 
     setAuditLogs(prev => [
       {
@@ -1378,6 +1435,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...prev
     ]);
 
+    // Sync to Supabase
+    createInvitationInSupabase(newInv).catch(err => {
+      console.warn('Failed to insert invitation in Supabase:', err);
+    });
+
     return newInv;
   };
 
@@ -1478,6 +1540,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('crosstech_current_org', JSON.stringify(orgRecord));
       localStorage.removeItem('crosstech_pending_invite');
     } catch {}
+
+    // Sync to Supabase
+    acceptInvitationInSupabase(token, activeUserId, activeUserEmail).catch(err => {
+      console.warn('Failed to accept invitation in Supabase:', err);
+    });
 
     return { success: true, organization: orgRecord, role };
   };

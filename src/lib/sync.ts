@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase';
-import { Organization, OrganizationMembership, Department, Team, Task, Board, Channel, User, UserRole } from './types';
+import { Organization, OrganizationMembership, Department, Team, Task, Board, Channel, User, UserRole, Invitation } from './types';
 
 export interface WorkspaceData {
   user?: User;
@@ -11,6 +11,7 @@ export interface WorkspaceData {
   tasks: Task[];
   boards: Board[];
   channels: Channel[];
+  invitations?: Invitation[];
 }
 
 export async function syncUserAndFetchWorkspace(
@@ -70,6 +71,60 @@ export async function syncUserAndFetchWorkspace(
     let userMems = memsData || [];
 
     if (userMems.length === 0) {
+      // Check if user was invited to an organization
+      const { data: pendingInvs } = await supabase
+        .from('invitations')
+        .select('*')
+        .ilike('email', dbUser.email)
+        .is('accepted_at', null)
+        .order('created_at', { ascending: false });
+
+      if (pendingInvs && pendingInvs.length > 0) {
+        for (const inv of pendingInvs) {
+          const { data: invMem } = await supabase
+            .from('organization_memberships')
+            .upsert({
+              organization_id: inv.organization_id,
+              user_id: dbUser.id,
+              role: inv.role || 'TEAM_MEMBER',
+              status: 'ACTIVE'
+            }, { onConflict: 'organization_id,user_id' })
+            .select()
+            .single();
+
+          if (invMem) {
+            userMems.push(invMem);
+
+            if (inv.department_id) {
+              await supabase
+                .from('department_memberships')
+                .upsert({
+                  department_id: inv.department_id,
+                  user_id: dbUser.id,
+                  role: inv.role === 'DEPARTMENT_MANAGER' ? 'MANAGER' : 'MEMBER'
+                }, { onConflict: 'department_id,user_id' });
+            }
+
+            if (inv.team_id) {
+              await supabase
+                .from('team_memberships')
+                .upsert({
+                  team_id: inv.team_id,
+                  user_id: dbUser.id,
+                  role: inv.role === 'TEAM_LEAD' ? 'LEAD' : 'MEMBER'
+                }, { onConflict: 'team_id,user_id' });
+            }
+
+            await supabase
+              .from('invitations')
+              .update({ accepted_at: new Date().toISOString() })
+              .eq('id', inv.id);
+          }
+        }
+      }
+    }
+
+    if (userMems.length === 0) {
       // Check if user created an organization
       const { data: ownedOrgs } = await supabase
         .from('organizations')
@@ -101,12 +156,13 @@ export async function syncUserAndFetchWorkspace(
         .limit(1);
 
       if (existingOrgs && existingOrgs.length > 0) {
+        // Enrolled as standard TEAM_MEMBER
         const { data: autoMem } = await supabase
           .from('organization_memberships')
           .insert({
             organization_id: existingOrgs[0].id,
             user_id: dbUser.id,
-            role: 'ORGANIZATION_OWNER',
+            role: 'TEAM_MEMBER',
             status: 'ACTIVE'
           })
           .select()
@@ -139,7 +195,8 @@ export async function syncUserAndFetchWorkspace(
         teams: [],
         tasks: [],
         boards: [],
-        channels: []
+        channels: [],
+        invitations: []
       };
     }
 
@@ -175,6 +232,18 @@ export async function syncUserAndFetchWorkspace(
     });
 
     const allUsers = Array.from(usersMap.values());
+    const allUserIds = Array.from(usersMap.keys());
+
+    // 2c. Fetch department and team memberships for these users
+    const { data: deptMems } = await supabase
+      .from('department_memberships')
+      .select('*')
+      .in('user_id', allUserIds);
+
+    const { data: teamMems } = await supabase
+      .from('team_memberships')
+      .select('*')
+      .in('user_id', allUserIds);
 
     // 3. Fetch Organizations
     const { data: orgsData } = await supabase
@@ -212,6 +281,12 @@ export async function syncUserAndFetchWorkspace(
       .select('*')
       .in('organization_id', orgIds);
 
+    // 9. Fetch Invitations
+    const { data: invsData } = await supabase
+      .from('invitations')
+      .select('*')
+      .in('organization_id', orgIds);
+
     return {
       user: {
         id: dbUser.id,
@@ -223,29 +298,33 @@ export async function syncUserAndFetchWorkspace(
       },
       users: allUsers,
       organizations: orgsData || [],
-      memberships: (allMemsData || userMems || []).map((m: any) => ({
-        id: m.id,
-        organization_id: m.organization_id,
-        user_id: m.user_id,
-        role: m.role as UserRole,
-        department_id: m.department_id,
-        team_id: m.team_id,
-        status: m.status,
-        joined_at: m.joined_at,
-        user: m.users ? {
-          id: m.users.id,
-          email: m.users.email,
-          full_name: m.users.full_name,
-          avatar_url: m.users.avatar_url,
-          status: m.users.status
-        } : {
-          id: dbUser.id,
-          email: dbUser.email,
-          full_name: dbUser.full_name,
-          avatar_url: dbUser.avatar_url,
-          status: dbUser.status
-        }
-      })),
+      memberships: (allMemsData || userMems || []).map((m: any) => {
+        const uDept = (deptMems || []).find((dm: any) => dm.user_id === m.user_id);
+        const uTeam = (teamMems || []).find((tm: any) => tm.user_id === m.user_id);
+        return {
+          id: m.id,
+          organization_id: m.organization_id,
+          user_id: m.user_id,
+          role: m.role as UserRole,
+          department_id: uDept?.department_id || m.department_id,
+          team_id: uTeam?.team_id || m.team_id,
+          status: m.status,
+          joined_at: m.joined_at,
+          user: m.users ? {
+            id: m.users.id,
+            email: m.users.email,
+            full_name: m.users.full_name,
+            avatar_url: m.users.avatar_url,
+            status: m.users.status
+          } : {
+            id: dbUser.id,
+            email: dbUser.email,
+            full_name: dbUser.full_name,
+            avatar_url: dbUser.avatar_url,
+            status: dbUser.status
+          }
+        };
+      }),
       departments: deptsData || [],
       teams: teamsData || [],
       tasks: tasksData || [],
@@ -253,7 +332,20 @@ export async function syncUserAndFetchWorkspace(
         ...b,
         columns: (b.board_columns || []).sort((c1: any, c2: any) => (c1.position || 0) - (c2.position || 0))
       })),
-      channels: channelsData || []
+      channels: channelsData || [],
+      invitations: (invsData || []).map((i: any) => ({
+        id: i.id,
+        organization_id: i.organization_id,
+        department_id: i.department_id,
+        team_id: i.team_id,
+        email: i.email,
+        role: i.role as UserRole,
+        token_hash: i.token_hash,
+        expires_at: i.expires_at,
+        accepted_at: i.accepted_at,
+        invited_by: i.invited_by,
+        created_at: i.created_at
+      }))
     };
   } catch (err) {
     console.warn('Supabase workspace sync error:', err);
@@ -582,5 +674,303 @@ export async function deleteTeamInSupabase(teamId: string): Promise<boolean> {
   } catch (err) {
     console.warn('Error deleting team in Supabase:', err);
     return false;
+  }
+}
+
+export async function addEmployeeInSupabase(params: {
+  orgId: string;
+  email: string;
+  fullName: string;
+  role: UserRole;
+  departmentId?: string;
+  teamId?: string;
+}) {
+  if (!isSupabaseConfigured || !supabase || !params.orgId || !params.email) return null;
+  try {
+    let validOrgId = params.orgId;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(validOrgId)) {
+      const { data: firstOrg } = await supabase.from('organizations').select('id').limit(1).maybeSingle();
+      if (firstOrg) validOrgId = firstOrg.id;
+    }
+
+    // 1. Resolve or create user in public.users
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', params.email.toLowerCase().trim())
+      .maybeSingle();
+
+    let dbUserId = existingUser?.id;
+    if (!dbUserId) {
+      const { data: newUser, error: createErr } = await supabase
+        .from('users')
+        .insert({
+          email: params.email.toLowerCase().trim(),
+          full_name: params.fullName || 'Employee',
+          status: 'ACTIVE'
+        })
+        .select('id')
+        .single();
+      if (createErr || !newUser) {
+        console.warn('Failed to insert user for employee in Supabase:', createErr);
+        return null;
+      }
+      dbUserId = newUser.id;
+    }
+
+    // 2. Upsert membership in organization_memberships
+    const { data: mem, error: memErr } = await supabase
+      .from('organization_memberships')
+      .upsert({
+        organization_id: validOrgId,
+        user_id: dbUserId,
+        role: params.role,
+        status: 'ACTIVE'
+      }, { onConflict: 'organization_id,user_id' })
+      .select()
+      .single();
+
+    if (memErr) console.warn('Supabase employee membership upsert error:', memErr);
+
+    // 3. Department membership
+    if (params.departmentId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.departmentId)) {
+      await supabase
+        .from('department_memberships')
+        .upsert({
+          department_id: params.departmentId,
+          user_id: dbUserId,
+          role: params.role === 'DEPARTMENT_MANAGER' ? 'MANAGER' : 'MEMBER'
+        }, { onConflict: 'department_id,user_id' });
+    }
+
+    // 4. Team membership
+    if (params.teamId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.teamId)) {
+      await supabase
+        .from('team_memberships')
+        .upsert({
+          team_id: params.teamId,
+          user_id: dbUserId,
+          role: params.role === 'TEAM_LEAD' ? 'LEAD' : 'MEMBER'
+        }, { onConflict: 'team_id,user_id' });
+    }
+
+    return { dbUserId, membership: mem };
+  } catch (err) {
+    console.warn('addEmployeeInSupabase error:', err);
+    return null;
+  }
+}
+
+export async function updateMemberRoleInSupabase(
+  orgId: string,
+  userId: string,
+  newRole: UserRole
+): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase || !orgId || !userId) return false;
+  try {
+    const { error } = await supabase
+      .from('organization_memberships')
+      .update({ role: newRole })
+      .eq('organization_id', orgId)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.warn('updateMemberRoleInSupabase error:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('updateMemberRoleInSupabase exception:', err);
+    return false;
+  }
+}
+
+export async function updateMemberDepartmentInSupabase(
+  orgId: string,
+  userId: string,
+  departmentId?: string,
+  teamId?: string
+): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase || !orgId || !userId) return false;
+  try {
+    const { data: orgDepts } = await supabase
+      .from('departments')
+      .select('id')
+      .eq('organization_id', orgId);
+
+    const deptIds = (orgDepts || []).map((d: any) => d.id);
+    if (deptIds.length > 0) {
+      await supabase
+        .from('department_memberships')
+        .delete()
+        .eq('user_id', userId)
+        .in('department_id', deptIds);
+    }
+
+    if (departmentId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(departmentId)) {
+      await supabase
+        .from('department_memberships')
+        .upsert({
+          department_id: departmentId,
+          user_id: userId,
+          role: 'MEMBER'
+        }, { onConflict: 'department_id,user_id' });
+    }
+
+    if (teamId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(teamId)) {
+      await supabase
+        .from('team_memberships')
+        .upsert({
+          team_id: teamId,
+          user_id: userId,
+          role: 'MEMBER'
+        }, { onConflict: 'team_id,user_id' });
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('updateMemberDepartmentInSupabase exception:', err);
+    return false;
+  }
+}
+
+export async function removeMemberInSupabase(
+  orgId: string,
+  userId: string
+): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase || !orgId || !userId) return false;
+  try {
+    await supabase
+      .from('organization_memberships')
+      .delete()
+      .eq('organization_id', orgId)
+      .eq('user_id', userId);
+
+    return true;
+  } catch (err) {
+    console.warn('removeMemberInSupabase exception:', err);
+    return false;
+  }
+}
+
+export async function createInvitationInSupabase(inv: {
+  organization_id: string;
+  department_id?: string;
+  team_id?: string;
+  email: string;
+  role: string;
+  token_hash: string;
+  expires_at?: string;
+  invited_by?: string;
+}) {
+  if (!isSupabaseConfigured || !supabase || !inv.organization_id || !inv.email) return null;
+  try {
+    let validOrgId = inv.organization_id;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(validOrgId)) {
+      const { data: firstOrg } = await supabase.from('organizations').select('id').limit(1).maybeSingle();
+      if (firstOrg) validOrgId = firstOrg.id;
+    }
+
+    let validDeptId = inv.department_id;
+    if (validDeptId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(validDeptId)) {
+      validDeptId = undefined;
+    }
+    let validTeamId = inv.team_id;
+    if (validTeamId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(validTeamId)) {
+      validTeamId = undefined;
+    }
+    let validInvitedBy = inv.invited_by;
+    if (validInvitedBy && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(validInvitedBy)) {
+      validInvitedBy = undefined;
+    }
+
+    const { data, error } = await supabase
+      .from('invitations')
+      .insert({
+        organization_id: validOrgId,
+        department_id: validDeptId || null,
+        team_id: validTeamId || null,
+        email: inv.email.toLowerCase().trim(),
+        role: inv.role,
+        token_hash: inv.token_hash,
+        expires_at: inv.expires_at || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        invited_by: validInvitedBy || null
+      })
+      .select()
+      .single();
+
+    if (error) console.warn('createInvitationInSupabase error:', error);
+    return data;
+  } catch (err) {
+    console.warn('createInvitationInSupabase exception:', err);
+    return null;
+  }
+}
+
+export async function acceptInvitationInSupabase(
+  token: string,
+  userId: string,
+  userEmail: string
+) {
+  if (!isSupabaseConfigured || !supabase || !token) return null;
+  try {
+    const { data: inv } = await supabase
+      .from('invitations')
+      .select('*')
+      .eq('token_hash', token)
+      .maybeSingle();
+
+    if (!inv) return null;
+
+    let dbUserId = userId;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+      const { data: user } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', userEmail.toLowerCase())
+        .maybeSingle();
+      if (user) dbUserId = user.id;
+    }
+
+    if (dbUserId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dbUserId)) {
+      await supabase
+        .from('organization_memberships')
+        .upsert({
+          organization_id: inv.organization_id,
+          user_id: dbUserId,
+          role: inv.role,
+          status: 'ACTIVE'
+        }, { onConflict: 'organization_id,user_id' });
+
+      if (inv.department_id) {
+        await supabase
+          .from('department_memberships')
+          .upsert({
+            department_id: inv.department_id,
+            user_id: dbUserId,
+            role: inv.role === 'DEPARTMENT_MANAGER' ? 'MANAGER' : 'MEMBER'
+          }, { onConflict: 'department_id,user_id' });
+      }
+
+      if (inv.team_id) {
+        await supabase
+          .from('team_memberships')
+          .upsert({
+            team_id: inv.team_id,
+            user_id: dbUserId,
+            role: inv.role === 'TEAM_LEAD' ? 'LEAD' : 'MEMBER'
+          }, { onConflict: 'team_id,user_id' });
+      }
+
+      await supabase
+        .from('invitations')
+        .update({ accepted_at: new Date().toISOString() })
+        .eq('id', inv.id);
+    }
+
+    return inv;
+  } catch (err) {
+    console.warn('acceptInvitationInSupabase exception:', err);
+    return null;
   }
 }
