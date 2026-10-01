@@ -4,7 +4,14 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { useUser } from '@clerk/nextjs';
 import { isClerkConfigured } from './clerk';
 import { DEFAULT_BOARD_COLUMNS } from './store';
-import { syncUserAndFetchWorkspace, createOrgInSupabase, createDepartmentInSupabase, createTeamInSupabase } from './sync';
+import {
+  syncUserAndFetchWorkspace,
+  createOrgInSupabase,
+  createDepartmentInSupabase,
+  createTeamInSupabase,
+  deleteDepartmentInSupabase,
+  deleteTeamInSupabase
+} from './sync';
 import {
   Organization,
   User,
@@ -60,9 +67,11 @@ interface AppContextType {
   
   departments: Department[];
   addDepartment: (dept: { name: string; description: string; manager_id?: string }) => Department;
+  deleteDepartment: (deptId: string) => Promise<boolean>;
   
   teams: Team[];
   addTeam: (team: { name: string; description: string; department_id: string; lead_id?: string }) => Team;
+  deleteTeam: (teamId: string) => Promise<boolean>;
   
   board: Board;
   tasks: Task[];
@@ -1079,6 +1088,106 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return newTeam;
   };
 
+  const deleteDepartment = async (deptId: string): Promise<boolean> => {
+    const isOwnerOrAdmin =
+      effectiveRole === 'ORGANIZATION_OWNER' ||
+      effectiveRole === 'ORGANIZATION_ADMIN' ||
+      currentUser.role === 'ORGANIZATION_OWNER' ||
+      currentUser.role === 'ORGANIZATION_ADMIN' ||
+      currentUserMembership?.role === 'ORGANIZATION_OWNER' ||
+      currentUserMembership?.role === 'ORGANIZATION_ADMIN';
+
+    if (!isOwnerOrAdmin) {
+      console.warn('Unauthorized: only Organization Owners and Admins can delete departments');
+      return false;
+    }
+
+    triggerLoader();
+    const targetDept = departments.find(d => d.id === deptId);
+
+    const updatedDepts = departments.filter(d => d.id !== deptId);
+    const updatedTeams = teams.filter(t => t.department_id !== deptId);
+    const updatedChannels = channels.filter(c => c.department_id !== deptId);
+
+    setDepartments(updatedDepts);
+    setTeams(updatedTeams);
+    setChannels(updatedChannels);
+
+    try {
+      localStorage.setItem('crosstech_depts', JSON.stringify(updatedDepts));
+      localStorage.setItem('crosstech_teams', JSON.stringify(updatedTeams));
+      localStorage.setItem('crosstech_channels', JSON.stringify(updatedChannels));
+    } catch {}
+
+    setAuditLogs(prev => [
+      {
+        id: `aud_${Date.now()}`,
+        organization_id: currentOrg.id,
+        actor_id: currentUser.id,
+        action: 'department.delete',
+        resource_type: 'Department',
+        resource_id: deptId,
+        metadata: { name: targetDept?.name },
+        created_at: new Date().toISOString()
+      },
+      ...prev
+    ]);
+
+    return await deleteDepartmentInSupabase(deptId);
+  };
+
+  const deleteTeam = async (teamId: string): Promise<boolean> => {
+    const isOwnerOrAdmin =
+      effectiveRole === 'ORGANIZATION_OWNER' ||
+      effectiveRole === 'ORGANIZATION_ADMIN' ||
+      currentUser.role === 'ORGANIZATION_OWNER' ||
+      currentUser.role === 'ORGANIZATION_ADMIN' ||
+      currentUserMembership?.role === 'ORGANIZATION_OWNER' ||
+      currentUserMembership?.role === 'ORGANIZATION_ADMIN';
+
+    if (!isOwnerOrAdmin) {
+      console.warn('Unauthorized: only Organization Owners and Admins can delete teams');
+      return false;
+    }
+
+    triggerLoader();
+    const targetTeam = teams.find(t => t.id === teamId);
+    const updatedTeams = teams.filter(t => t.id !== teamId);
+    setTeams(updatedTeams);
+
+    if (targetTeam?.department_id) {
+      setDepartments(prev => {
+        const next = prev.map(d =>
+          d.id === targetTeam.department_id
+            ? { ...d, teams_count: Math.max(0, (d.teams_count || 1) - 1) }
+            : d
+        );
+        try { localStorage.setItem('crosstech_depts', JSON.stringify(next)); } catch {}
+        return next;
+      });
+    }
+
+    try {
+      localStorage.setItem('crosstech_teams', JSON.stringify(updatedTeams));
+    } catch {}
+
+    setAuditLogs(prev => [
+      {
+        id: `aud_${Date.now()}`,
+        organization_id: currentOrg.id,
+        actor_id: currentUser.id,
+        action: 'team.delete',
+        resource_type: 'Team',
+        resource_id: teamId,
+        metadata: { name: targetTeam?.name, department_id: targetTeam?.department_id },
+        created_at: new Date().toISOString()
+      },
+      ...prev
+    ]);
+
+    return await deleteTeamInSupabase(teamId);
+  };
+
   const addTask = (task: {
     title: string;
     description?: string;
@@ -1416,8 +1525,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addEmployee,
         departments,
         addDepartment,
+        deleteDepartment,
         teams,
         addTeam,
+        deleteTeam,
         board,
         tasks,
         addTask,

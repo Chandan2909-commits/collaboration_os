@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import {
   Building2,
@@ -9,7 +9,8 @@ import {
   ArrowRight,
   MessageSquare,
   ShieldAlert,
-  UserCheck
+  UserCheck,
+  Trash2
 } from 'lucide-react';
 import { useApp } from '@/lib/AppContext';
 import { SignatureHero } from '@/components/layout/SignatureHero';
@@ -17,11 +18,36 @@ import { SignatureHero } from '@/components/layout/SignatureHero';
 export default function DepartmentsPage() {
   const {
     departments,
+    deleteDepartment,
     teams,
     users,
+    currentUser,
+    currentUserMembership,
     setIsCreateDeptModalOpen,
     setIsCreateTeamModalOpen
   } = useApp();
+
+  const isOwnerOrAdmin =
+    currentUser.role === 'ORGANIZATION_OWNER' ||
+    currentUser.role === 'ORGANIZATION_ADMIN' ||
+    currentUserMembership?.role === 'ORGANIZATION_OWNER' ||
+    currentUserMembership?.role === 'ORGANIZATION_ADMIN';
+
+  const [deletingDeptId, setDeletingDeptId] = useState<string | null>(null);
+
+  const handleDeleteDepartment = async (deptId: string, deptName: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${deptName}"?\n\nThis will permanently delete the department, its assigned teams, and discussions.`)) {
+      return;
+    }
+    setDeletingDeptId(deptId);
+    try {
+      await deleteDepartment(deptId);
+    } catch (err) {
+      console.error('Failed to delete department:', err);
+    } finally {
+      setDeletingDeptId(null);
+    }
+  };
 
   return (
     <div className="animate-page-enter" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -207,7 +233,7 @@ export default function DepartmentsPage() {
                   <ArrowRight style={{ width: 14, height: 14 }} />
                 </Link>
 
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Link href="/chat" className="btn btn-secondary btn-sm">
                     <MessageSquare style={{ width: 13, height: 13 }} />
                     <span>Channel</span>
@@ -220,6 +246,31 @@ export default function DepartmentsPage() {
                     <Plus style={{ width: 13, height: 13 }} />
                     <span>Add Team</span>
                   </button>
+                  {isOwnerOrAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDepartment(dept.id, dept.name)}
+                      disabled={deletingDeptId === dept.id}
+                      title="Delete Department (Admin Only)"
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: '8px',
+                        border: '1px solid #fecdd3',
+                        background: '#fff1f2',
+                        color: '#e11d48',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        cursor: deletingDeptId === dept.id ? 'not-allowed' : 'pointer',
+                        transition: 'all 150ms ease'
+                      }}
+                    >
+                      <Trash2 style={{ width: 12, height: 12 }} />
+                      <span>{deletingDeptId === dept.id ? 'Deleting...' : 'Delete'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

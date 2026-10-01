@@ -9,7 +9,8 @@ import {
   Kanban,
   MessageSquare,
   ShieldCheck,
-  ArrowRight
+  ArrowRight,
+  Trash2
 } from 'lucide-react';
 import { useApp } from '@/lib/AppContext';
 import { SignatureHero } from '@/components/layout/SignatureHero';
@@ -17,12 +18,37 @@ import { SignatureHero } from '@/components/layout/SignatureHero';
 export default function TeamsPage() {
   const {
     teams,
+    deleteTeam,
     departments,
     users,
     tasks,
+    currentUser,
+    currentUserMembership,
     setIsCreateTeamModalOpen,
     setIsInviteModalOpen
   } = useApp();
+
+  const isOwnerOrAdmin =
+    currentUser.role === 'ORGANIZATION_OWNER' ||
+    currentUser.role === 'ORGANIZATION_ADMIN' ||
+    currentUserMembership?.role === 'ORGANIZATION_OWNER' ||
+    currentUserMembership?.role === 'ORGANIZATION_ADMIN';
+
+  const [deletingTeamId, setDeletingTeamId] = useState<string | null>(null);
+
+  const handleDeleteTeam = async (teamId: string, teamName: string) => {
+    if (!window.confirm(`Are you sure you want to delete the "${teamName}" team?`)) {
+      return;
+    }
+    setDeletingTeamId(teamId);
+    try {
+      await deleteTeam(teamId);
+    } catch (err) {
+      console.error('Failed to delete team:', err);
+    } finally {
+      setDeletingTeamId(null);
+    }
+  };
 
   const [selectedDeptId, setSelectedDeptId] = useState<string>('ALL');
 
@@ -223,11 +249,36 @@ export default function TeamsPage() {
                   <span>Sprint Board</span>
                 </Link>
 
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Link href="/chat" className="btn btn-secondary btn-sm">
                     <MessageSquare style={{ width: 13, height: 13 }} />
                     <span>Team Chat</span>
                   </Link>
+                  {isOwnerOrAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTeam(team.id, team.name)}
+                      disabled={deletingTeamId === team.id}
+                      title="Delete Team (Admin Only)"
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: '8px',
+                        border: '1px solid #fecdd3',
+                        background: '#fff1f2',
+                        color: '#e11d48',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        cursor: deletingTeamId === team.id ? 'not-allowed' : 'pointer',
+                        transition: 'all 150ms ease'
+                      }}
+                    >
+                      <Trash2 style={{ width: 12, height: 12 }} />
+                      <span>{deletingTeamId === team.id ? 'Deleting...' : 'Delete'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

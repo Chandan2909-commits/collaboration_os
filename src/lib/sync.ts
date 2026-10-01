@@ -544,3 +544,43 @@ export async function createTeamInSupabase(params: {
     return null;
   }
 }
+
+export async function deleteDepartmentInSupabase(deptId: string): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase || !deptId) return false;
+
+  try {
+    const { error } = await supabase
+      .from('departments')
+      .delete()
+      .eq('id', deptId);
+
+    if (error) {
+      console.warn('Failed to delete department in Supabase:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Error deleting department in Supabase:', err);
+    return false;
+  }
+}
+
+export async function deleteTeamInSupabase(teamId: string): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase || !teamId) return false;
+
+  try {
+    const { error } = await supabase
+      .from('teams')
+      .delete()
+      .eq('id', teamId);
+
+    if (error) {
+      console.warn('Failed to delete team in Supabase:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Error deleting team in Supabase:', err);
+    return false;
+  }
+}
