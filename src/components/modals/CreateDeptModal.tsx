@@ -5,24 +5,39 @@ import { X, Building2 } from 'lucide-react';
 import { useApp } from '@/lib/AppContext';
 
 export function CreateDeptModal() {
-  const { isCreateDeptModalOpen, setIsCreateDeptModalOpen, addDepartment, users } = useApp();
+  const { isCreateDeptModalOpen, setIsCreateDeptModalOpen, addDepartment, users, currentUser } = useApp();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [managerId, setManagerId] = useState(users[0]?.id || '');
+  const [managerId, setManagerId] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    if (isCreateDeptModalOpen) {
+      setManagerId(currentUser?.id || users[0]?.id || '');
+      setIsSubmitting(false);
+    }
+  }, [isCreateDeptModalOpen, currentUser?.id, users]);
 
   if (!isCreateDeptModalOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
-    addDepartment({
-      name: name.trim(),
-      description: description.trim(),
-      manager_id: managerId
-    });
-    setName('');
-    setDescription('');
-    setIsCreateDeptModalOpen(false);
+    if (!name.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      addDepartment({
+        name: name.trim(),
+        description: description.trim(),
+        manager_id: managerId || currentUser?.id || undefined
+      });
+      setName('');
+      setDescription('');
+      setIsCreateDeptModalOpen(false);
+    } catch (err) {
+      console.error('Error creating department:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -77,9 +92,14 @@ export function CreateDeptModal() {
               <label className="settings-label">Department Manager</label>
               <select
                 className="settings-input"
-                value={managerId}
+                value={managerId || currentUser?.id || ''}
                 onChange={e => setManagerId(e.target.value)}
               >
+                {currentUser && !users.some(u => u.id === currentUser.id) && (
+                  <option value={currentUser.id}>
+                    {currentUser.full_name} ({currentUser.email || 'Workspace Owner'})
+                  </option>
+                )}
                 {users.map(u => (
                   <option key={u.id} value={u.id}>
                     {u.full_name} ({u.email})
@@ -97,8 +117,12 @@ export function CreateDeptModal() {
             >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Create Department
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isSubmitting || !name.trim()}
+            >
+              {isSubmitting ? 'Creating...' : 'Create Department'}
             </button>
           </div>
         </form>

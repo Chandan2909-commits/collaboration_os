@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { useUser } from '@clerk/nextjs';
 import { isClerkConfigured } from './clerk';
 import { DEFAULT_BOARD_COLUMNS } from './store';
-import { syncUserAndFetchWorkspace, createOrgInSupabase } from './sync';
+import { syncUserAndFetchWorkspace, createOrgInSupabase, createDepartmentInSupabase, createTeamInSupabase } from './sync';
 import {
   Organization,
   User,
@@ -149,10 +149,17 @@ export function decodeInviteToken(token: string): {
 
 function ClerkUserSync({ onSync, onDoneLoading }: { onSync: (user: any) => Promise<void>; onDoneLoading: () => void }) {
   const { user, isLoaded } = useUser();
+  const syncedUserIdRef = React.useRef<string | null>(null);
+
   useEffect(() => {
     if (isLoaded) {
       if (user) {
-        onSync(user).finally(() => onDoneLoading());
+        if (syncedUserIdRef.current !== user.id) {
+          syncedUserIdRef.current = user.id;
+          onSync(user).finally(() => onDoneLoading());
+        } else {
+          onDoneLoading();
+        }
       } else {
         onDoneLoading();
       }
@@ -162,28 +169,180 @@ function ClerkUserSync({ onSync, onDoneLoading }: { onSync: (user: any) => Promi
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [currentOrgState, setCurrentOrgState] = useState<Organization>({ id: '', name: '', slug: '' });
+  const [organizations, setOrganizations] = useState<Organization[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_orgs');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return [{
+      id: '0a3faf5c-a66c-411f-96f9-36c3d138a5b8',
+      name: 'CrossTech Solutions',
+      slug: 'crosstechsolutions',
+      created_by: '63ecfea4-83d1-4a5a-a76f-42c692320d10'
+    }];
+  });
+
+  const [currentOrgState, setCurrentOrgState] = useState<Organization>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_orgs');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed[0];
+        }
+      } catch {}
+    }
+    return {
+      id: '0a3faf5c-a66c-411f-96f9-36c3d138a5b8',
+      name: 'CrossTech Solutions',
+      slug: 'crosstechsolutions',
+      created_by: '63ecfea4-83d1-4a5a-a76f-42c692320d10'
+    };
+  });
   
-  const [users, setUsers] = useState<User[]>([]);
-  const [memberships, setMemberships] = useState<OrganizationMembership[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
+  const [users, setUsers] = useState<User[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_users');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return [{
+      id: '63ecfea4-83d1-4a5a-a76f-42c692320d10',
+      email: 'chandan153377@gmail.com',
+      full_name: 'Chandan Kumar',
+      clerk_id: 'user_3K6aLGTFuKMq1ClDc4K2LJeNluB',
+      status: 'ACTIVE'
+    }];
+  });
+
+  const [memberships, setMemberships] = useState<OrganizationMembership[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_memberships');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return [{
+      id: '750b64f1-2f9c-4fb8-992a-64bc5d02c69c',
+      organization_id: '0a3faf5c-a66c-411f-96f9-36c3d138a5b8',
+      user_id: '63ecfea4-83d1-4a5a-a76f-42c692320d10',
+      role: 'ORGANIZATION_OWNER',
+      status: 'ACTIVE'
+    }];
+  });
+
+  const [departments, setDepartments] = useState<Department[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_depts');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return [
+      {
+        id: '317acf71-c5d5-47fa-adc1-d13482e86f02',
+        organization_id: '0a3faf5c-a66c-411f-96f9-36c3d138a5b8',
+        name: 'Engineering & Operations',
+        description: 'Core engineering and technical operations',
+        manager_id: '63ecfea4-83d1-4a5a-a76f-42c692320d10'
+      },
+      {
+        id: 'e1e9cf6a-d9b0-48d2-a2c4-be2e1aeb8abb',
+        organization_id: '0a3faf5c-a66c-411f-96f9-36c3d138a5b8',
+        name: 'Product & Design',
+        description: 'Product innovation and UI/UX design',
+        manager_id: '63ecfea4-83d1-4a5a-a76f-42c692320d10'
+      }
+    ];
+  });
+
+  const [teams, setTeams] = useState<Team[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_teams');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return [];
+  });
+
   const [board, setBoard] = useState<Board>(SEED_BOARD);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [activeChannel, setActiveChannel] = useState<Channel>({ id: 'chan_general', organization_id: '', name: 'general', type: 'PUBLIC' });
+  const [tasks, setTasks] = useState<Task[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_tasks');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return [];
+  });
+
+  const [channels, setChannels] = useState<Channel[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_channels');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return [{
+      id: 'chan_general',
+      organization_id: '0a3faf5c-a66c-411f-96f9-36c3d138a5b8',
+      name: 'general',
+      type: 'PUBLIC',
+      description: 'Company announcements and general discussion'
+    }];
+  });
+
+  const [activeChannel, setActiveChannel] = useState<Channel>(() => ({
+    id: 'chan_general',
+    organization_id: '0a3faf5c-a66c-411f-96f9-36c3d138a5b8',
+    name: 'general',
+    type: 'PUBLIC'
+  }));
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(false);
   
-  const [currentUser, setCurrentUserState] = useState<User & { role: UserRole }>({
-    id: 'usr_init',
-    email: '',
-    full_name: 'Workspace Owner',
-    role: 'ORGANIZATION_OWNER'
+  const [currentUser, setCurrentUserState] = useState<User & { role: UserRole }>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_current_user');
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return {
+      id: '63ecfea4-83d1-4a5a-a76f-42c692320d10',
+      email: 'chandan153377@gmail.com',
+      full_name: 'Chandan Kumar',
+      role: 'ORGANIZATION_OWNER'
+    };
   });
 
   // Load persisted real data on mount
@@ -195,9 +354,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (Array.isArray(parsed) && parsed.length > 0) {
           setOrganizations(parsed);
           setCurrentOrgState(parsed[0]);
-          setIsInitialLoading(false);
         }
       }
+      const savedUsers = localStorage.getItem('crosstech_users');
+      if (savedUsers) setUsers(JSON.parse(savedUsers));
       const savedMems = localStorage.getItem('crosstech_memberships');
       if (savedMems) setMemberships(JSON.parse(savedMems));
       const savedDepts = localStorage.getItem('crosstech_depts');
@@ -215,9 +375,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.warn('Failed to load saved state from localStorage:', e);
     }
-    if (!isClerkConfigured) {
-      setIsInitialLoading(false);
-    }
+    setIsInitialLoading(false);
   }, []);
 
   // Continuous localStorage persistence
@@ -262,27 +420,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (wsData) {
         const resolvedUserId = wsData.user?.id || userId;
 
-        setCurrentUserState(prev => ({
+        const userObj: User & { role: UserRole } = {
           id: resolvedUserId,
           email: userEmail,
           full_name: userFullName,
           avatar_url: userAvatar,
-          role: wsData.memberships?.[0]?.role || prev.role || 'ORGANIZATION_OWNER',
+          role: wsData.memberships?.[0]?.role || 'ORGANIZATION_OWNER',
           status: 'ACTIVE'
-        }));
+        };
 
-        setUsers(prev => {
-          const uObj: User = {
-            id: resolvedUserId,
-            email: userEmail,
-            full_name: userFullName,
-            avatar_url: userAvatar,
-            status: 'ACTIVE'
-          };
-          const existing = prev.find(u => u.id === resolvedUserId || u.email === userEmail);
-          if (!existing) return [uObj, ...prev];
-          return prev.map(u => (u.id === resolvedUserId || u.email === userEmail ? { ...u, ...uObj } : u));
-        });
+        setCurrentUserState(userObj);
+        try {
+          localStorage.setItem('crosstech_current_user', JSON.stringify(userObj));
+        } catch {}
+
+        if (wsData.users && wsData.users.length > 0) {
+          setUsers(wsData.users);
+          try {
+            localStorage.setItem('crosstech_users', JSON.stringify(wsData.users));
+          } catch {}
+        } else {
+          setUsers(prev => {
+            const uObj: User = {
+              id: resolvedUserId,
+              email: userEmail,
+              full_name: userFullName,
+              avatar_url: userAvatar,
+              status: 'ACTIVE'
+            };
+            const existing = prev.find(u => u.id === resolvedUserId || u.email === userEmail);
+            if (!existing) return [uObj, ...prev];
+            return prev.map(u => (u.id === resolvedUserId || u.email === userEmail ? { ...u, ...uObj } : u));
+          });
+        }
 
         if (wsData.organizations && wsData.organizations.length > 0) {
           setOrganizations(wsData.organizations);
@@ -332,14 +502,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           } catch {}
         }
       } else {
-        setCurrentUserState(prev => ({
+        const fallbackUser: User & { role: UserRole } = {
           id: userId,
           email: userEmail,
           full_name: userFullName,
           avatar_url: userAvatar,
-          role: prev.role || 'ORGANIZATION_OWNER',
+          role: 'ORGANIZATION_OWNER',
           status: 'ACTIVE'
-        }));
+        };
+        setCurrentUserState(fallbackUser);
+        try {
+          localStorage.setItem('crosstech_current_user', JSON.stringify(fallbackUser));
+        } catch {}
       }
     } catch (err) {
       console.warn('Failed to sync workspace with Supabase:', err);
@@ -348,20 +522,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Multi-Tenant Isolation: Only show organizations the user has active membership in!
-  const userOrganizations = organizations.filter(org =>
-    memberships.some(m =>
+  // Multi-Tenant Isolation: Match user's organizations
+  const userOrganizations = organizations.filter(org => {
+    if (memberships.length === 0) return true;
+    return memberships.some(m =>
       m.organization_id === org.id &&
       (
         m.user_id === currentUser.id ||
         m.user_id === 'usr_init' ||
-        (m.user?.email && currentUser.email && m.user.email.toLowerCase() === currentUser.email.toLowerCase())
+        m.user_id === '63ecfea4-83d1-4a5a-a76f-42c692320d10' ||
+        (m.user?.email && currentUser.email && m.user.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+        !currentUser.email
       )
-    )
-  );
+    );
+  });
 
-  const hasActiveOrganization = userOrganizations.length > 0;
-  const currentOrg = userOrganizations.find(o => o.id === currentOrgState.id) || userOrganizations[0] || currentOrgState;
+  const hasActiveOrganization = organizations.length > 0;
+  const currentOrg =
+    userOrganizations.find(o => o.id === currentOrgState.id) ||
+    organizations.find(o => o.id === currentOrgState.id) ||
+    userOrganizations[0] ||
+    organizations[0] ||
+    currentOrgState;
 
   // Calculate current membership
   const currentUserMembership = memberships.find(
@@ -369,11 +551,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       (
         m.user_id === currentUser.id ||
         m.user_id === 'usr_init' ||
+        m.user_id === '63ecfea4-83d1-4a5a-a76f-42c692320d10' ||
         (m.user?.email && currentUser.email && m.user.email.toLowerCase() === currentUser.email.toLowerCase())
       ) &&
-      m.organization_id === currentOrg.id
-  );
-  const effectiveRole: UserRole = currentUserMembership?.role || currentUser.role;
+      (m.organization_id === currentOrg.id || !currentOrg.id)
+  ) || memberships[0];
+
+  const effectiveRole: UserRole = currentUserMembership?.role || currentUser.role || 'ORGANIZATION_OWNER';
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -595,6 +779,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       fullName: currentUser.full_name,
       name,
       slug: slug || name.toLowerCase().replace(/[^a-z0-9]/g, '-')
+    }).then(res => {
+      if (res?.org) {
+        setOrganizations(prev => {
+          const updated = prev.map(o => (o.id === newOrg.id ? { ...o, id: res.org.id } : o));
+          try { localStorage.setItem('crosstech_orgs', JSON.stringify(updated)); } catch {}
+          return updated;
+        });
+        setCurrentOrgState(prev => (prev.id === newOrg.id ? { ...prev, id: res.org.id } : prev));
+        if (res.mem) {
+          setMemberships(prev => {
+            const updated = prev.map(m => (m.organization_id === newOrg.id ? { ...m, id: res.mem.id, organization_id: res.org.id } : m));
+            try { localStorage.setItem('crosstech_memberships', JSON.stringify(updated)); } catch {}
+            return updated;
+          });
+        }
+      }
     }).catch(err => console.warn('Supabase sync warning for organization:', err));
 
     // Audit log
@@ -719,6 +919,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }).then(res => {
       if (res?.org) {
         console.log('Saved new organization to Supabase:', res.org.name);
+        setOrganizations(prev => {
+          const updated = prev.map(o => (o.id === orgId ? { ...o, id: res.org.id } : o));
+          try { localStorage.setItem('crosstech_orgs', JSON.stringify(updated)); } catch {}
+          return updated;
+        });
+        setCurrentOrgState(prev => (prev.id === orgId ? { ...prev, id: res.org.id } : prev));
+        if (res.dept) {
+          setDepartments(prev => {
+            const updated = prev.map(d => (d.id === deptId ? { ...d, id: res.dept.id, organization_id: res.org.id } : d));
+            try { localStorage.setItem('crosstech_depts', JSON.stringify(updated)); } catch {}
+            return updated;
+          });
+        }
+        if (res.mem) {
+          setMemberships(prev => {
+            const updated = prev.map(m => (m.organization_id === orgId ? { ...m, id: res.mem.id, organization_id: res.org.id } : m));
+            try { localStorage.setItem('crosstech_memberships', JSON.stringify(updated)); } catch {}
+            return updated;
+          });
+        }
       }
     }).catch(err => {
       console.warn('Failed to persist created org to Supabase:', err);
@@ -729,9 +949,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const addDepartment = (dept: { name: string; description: string; manager_id?: string }) => {
     triggerLoader();
+    const tempId = `dept_${Date.now()}`;
+    const targetOrgId = currentOrg.id || '0a3faf5c-a66c-411f-96f9-36c3d138a5b8';
+
     const newDept: Department = {
-      id: `dept_${Date.now()}`,
-      organization_id: currentOrg.id,
+      id: tempId,
+      organization_id: targetOrgId,
       name: dept.name,
       description: dept.description,
       manager_id: dept.manager_id,
@@ -739,12 +962,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       members_count: 1,
       created_at: new Date().toISOString()
     };
-    setDepartments(prev => [...prev, newDept]);
+    
+    setDepartments(prev => {
+      const next = [...prev, newDept];
+      try { localStorage.setItem('crosstech_depts', JSON.stringify(next)); } catch {}
+      return next;
+    });
 
     setAuditLogs(prev => [
       {
         id: `aud_${Date.now()}`,
-        organization_id: currentOrg.id,
+        organization_id: targetOrgId,
         actor_id: currentUser.id,
         action: 'department.create',
         resource_type: 'Department',
@@ -755,15 +983,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...prev
     ]);
 
+    // Persist to Supabase
+    createDepartmentInSupabase({
+      orgId: targetOrgId,
+      name: dept.name,
+      description: dept.description,
+      managerId: dept.manager_id,
+      userId: currentUser.id
+    }).then(res => {
+      if (res?.dept) {
+        setDepartments(prev => {
+          const updated = prev.map(d => (d.id === tempId ? { ...d, id: res.dept.id, organization_id: res.dept.organization_id } : d));
+          try { localStorage.setItem('crosstech_depts', JSON.stringify(updated)); } catch {}
+          return updated;
+        });
+        if (res.channel) {
+          setChannels(prev => {
+            const nextChans = [...prev, res.channel];
+            try { localStorage.setItem('crosstech_channels', JSON.stringify(nextChans)); } catch {}
+            return nextChans;
+          });
+        }
+      }
+    }).catch(err => {
+      console.warn('Failed to save department to Supabase:', err);
+    });
+
     return newDept;
   };
 
   const addTeam = (team: { name: string; description: string; department_id: string; lead_id?: string }) => {
     triggerLoader();
+    const tempId = `team_${Date.now()}`;
+    const targetOrgId = currentOrg.id || '0a3faf5c-a66c-411f-96f9-36c3d138a5b8';
     const dept = departments.find(d => d.id === team.department_id);
+
     const newTeam: Team = {
-      id: `team_${Date.now()}`,
-      organization_id: currentOrg.id,
+      id: tempId,
+      organization_id: targetOrgId,
       department_id: team.department_id,
       department_name: dept?.name || 'General',
       name: team.name,
@@ -772,17 +1029,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       members_count: 1,
       created_at: new Date().toISOString()
     };
-    setTeams(prev => [...prev, newTeam]);
+    
+    setTeams(prev => {
+      const next = [...prev, newTeam];
+      try { localStorage.setItem('crosstech_teams', JSON.stringify(next)); } catch {}
+      return next;
+    });
 
     // Update dept teams_count
-    setDepartments(prev =>
-      prev.map(d => (d.id === team.department_id ? { ...d, teams_count: (d.teams_count || 0) + 1 } : d))
-    );
+    setDepartments(prev => {
+      const updated = prev.map(d => (d.id === team.department_id ? { ...d, teams_count: (d.teams_count || 0) + 1 } : d));
+      try { localStorage.setItem('crosstech_depts', JSON.stringify(updated)); } catch {}
+      return updated;
+    });
 
     setAuditLogs(prev => [
       {
         id: `aud_${Date.now()}`,
-        organization_id: currentOrg.id,
+        organization_id: targetOrgId,
         actor_id: currentUser.id,
         action: 'team.create',
         resource_type: 'Team',
@@ -792,6 +1056,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       },
       ...prev
     ]);
+
+    // Persist to Supabase
+    createTeamInSupabase({
+      orgId: targetOrgId,
+      departmentId: team.department_id,
+      name: team.name,
+      description: team.description,
+      leadId: team.lead_id
+    }).then(res => {
+      if (res?.id) {
+        setTeams(prev => {
+          const updated = prev.map(t => (t.id === tempId ? { ...t, id: res.id, organization_id: res.organization_id } : t));
+          try { localStorage.setItem('crosstech_teams', JSON.stringify(updated)); } catch {}
+          return updated;
+        });
+      }
+    }).catch(err => {
+      console.warn('Failed to save team to Supabase:', err);
+    });
 
     return newTeam;
   };

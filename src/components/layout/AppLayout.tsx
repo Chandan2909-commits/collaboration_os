@@ -37,8 +37,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Show clean branded loading indicator while validating user & fetching workspace
-  if (isInitialLoading) {
+  // Show clean branded loading indicator while validating user & fetching workspace if no active org
+  if (isInitialLoading && !hasActiveOrganization) {
     return (
       <div
         style={{
