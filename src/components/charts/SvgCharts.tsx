@@ -32,15 +32,16 @@ interface DualLineChartProps {
 }
 
 export function DualBezierChart({
-  seriesA = [12, 19, 28, 35, 42, 58, 64],
-  seriesB = [8, 14, 20, 26, 32, 45, 52],
+  seriesA = [0, 0, 0, 0, 0, 0, 0],
+  seriesB = [0, 0, 0, 0, 0, 0, 0],
   labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
   height = 190
 }: DualLineChartProps) {
   const width = 560;
   const paddingX = 35;
   const paddingY = 25;
-  const maxVal = Math.max(...seriesA, ...seriesB, 70);
+  const highest = Math.max(...seriesA, ...seriesB, 0);
+  const maxVal = highest > 0 ? Math.ceil(highest * 1.25) : 5;
 
   const stepX = (width - paddingX * 2) / (labels.length - 1);
   const chartHeight = height - paddingY * 2;
@@ -96,24 +97,68 @@ export function DualBezierChart({
         })}
 
         {/* Area Fills */}
-        <path d={areaA} fill="url(#grad-series-a)" />
-        <path d={areaB} fill="url(#grad-series-b)" />
+        {highest > 0 && <path d={areaA} fill="url(#grad-series-a)" />}
+        {highest > 0 && <path d={areaB} fill="url(#grad-series-b)" />}
 
         {/* Curved Stroke Lines */}
         <path d={pathA} fill="none" stroke="#1d4ed8" strokeWidth="2.5" strokeLinecap="round" />
         <path d={pathB} fill="none" stroke="#10b981" strokeWidth="2" strokeDasharray="4 2" strokeLinecap="round" />
 
-        {/* Points on Series A */}
+        {/* Empty state overlay when no tasks have been created */}
+        {highest === 0 && (
+          <g>
+            <text
+              x={width / 2}
+              y={height / 2 - 8}
+              textAnchor="middle"
+              fill="#64748b"
+              fontSize="12"
+              fontWeight="600"
+              fontFamily="Inter, sans-serif"
+            >
+              No sprint tasks logged yet
+            </text>
+            <text
+              x={width / 2}
+              y={height / 2 + 12}
+              textAnchor="middle"
+              fill="#94a3b8"
+              fontSize="10.5"
+              fontFamily="Inter, sans-serif"
+            >
+              Create tasks on your Kanban board to graph real sprint velocity
+            </text>
+          </g>
+        )}
+
+        {/* Points on Series A (Created) */}
         {pointsA.map((p, idx) => (
           <circle
-            key={idx}
+            key={`a-${idx}`}
             cx={p.x}
             cy={p.y}
             r="3.5"
             fill="#ffffff"
             stroke="#1d4ed8"
             strokeWidth="2"
-          />
+          >
+            <title>{`${labels[idx]}: ${seriesA[idx]} created`}</title>
+          </circle>
+        ))}
+
+        {/* Points on Series B (Resolved) */}
+        {pointsB.map((p, idx) => (
+          <circle
+            key={`b-${idx}`}
+            cx={p.x}
+            cy={p.y}
+            r="3"
+            fill="#10b981"
+            stroke="#ffffff"
+            strokeWidth="1.5"
+          >
+            <title>{`${labels[idx]}: ${seriesB[idx]} resolved`}</title>
+          </circle>
         ))}
 
         {/* X Axis Labels */}
@@ -144,7 +189,7 @@ interface SpeedometerProps {
 }
 
 export function SpeedometerGauge({
-  score = 94.2,
+  score = 0,
   maxScore = 100,
   size = 210,
   label = 'Velocity Score'
@@ -214,7 +259,7 @@ export function SpeedometerGauge({
       </svg>
       <div style={{ marginTop: '-12px', textAlign: 'center' }}>
         <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#111827', fontFamily: 'Montserrat, sans-serif' }}>
-          {score}%
+          {Number(score).toFixed(score % 1 === 0 ? 0 : 1)}%
         </div>
         <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           {label}
@@ -225,7 +270,7 @@ export function SpeedometerGauge({
 }
 
 export function CircularProgressRing({
-  pct = 78,
+  pct = 0,
   size = 64,
   strokeWidth = 6,
   strokeColor = '#1e1e1e'
@@ -235,10 +280,11 @@ export function CircularProgressRing({
   strokeWidth?: number;
   strokeColor?: string;
 }) {
+  const safePct = Math.max(0, Math.min(100, Number(pct) || 0));
   const radius = (size - strokeWidth * 2) / 2;
   const center = size / 2;
   const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference * (1 - pct / 100);
+  const strokeDashoffset = circumference * (1 - safePct / 100);
 
   return (
     <div style={{ position: 'relative', width: size, height: size }}>
@@ -280,7 +326,7 @@ export function CircularProgressRing({
           color: '#111827'
         }}
       >
-        {pct}%
+        {Math.round(safePct)}%
       </div>
     </div>
   );

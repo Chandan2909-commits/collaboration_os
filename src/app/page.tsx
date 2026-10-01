@@ -28,6 +28,7 @@ export default function DashboardOverviewPage() {
     currentOrg,
     currentUser,
     currentUserMembership,
+    memberships,
     departments,
     teams,
     tasks,
@@ -55,12 +56,69 @@ export default function DashboardOverviewPage() {
   const inProgressTasks = tasks.filter(t => t.column_id === 'col_in_progress').length;
   const doneTasks = tasks.filter(t => t.column_id === 'col_done').length;
   const completionRate = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+  const velocityScore = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 1000) / 10 : 0;
 
   // Manager stats
   const deptTotalTasks = myDeptTasks.length;
   const deptDoneTasks = myDeptTasks.filter(t => t.column_id === 'col_done').length;
   const deptCompletionRate = deptTotalTasks > 0 ? Math.round((deptDoneTasks / deptTotalTasks) * 100) : 0;
+  const deptVelocityScore = deptTotalTasks > 0 ? Math.round((deptDoneTasks / deptTotalTasks) * 1000) / 10 : 0;
   const deptTeams = teams.filter(t => t.department_id === userDeptId);
+
+  // Real Weekly Task Trend Calculation
+  const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + mondayOffset);
+  monday.setHours(0, 0, 0, 0);
+
+  const createdDaily = [0, 0, 0, 0, 0, 0, 0];
+  const resolvedDaily = [0, 0, 0, 0, 0, 0, 0];
+  let priorCreated = 0;
+  let priorResolved = 0;
+
+  tasks.forEach(t => {
+    const cDate = t.created_at ? new Date(t.created_at) : null;
+    if (cDate && !isNaN(cDate.getTime())) {
+      if (cDate < monday) {
+        priorCreated += 1;
+      } else {
+        const d = cDate.getDay();
+        const idx = d === 0 ? 6 : d - 1;
+        if (idx >= 0 && idx < 7) {
+          createdDaily[idx] += 1;
+        }
+      }
+    }
+
+    if (t.column_id === 'col_done') {
+      const rDate = t.updated_at ? new Date(t.updated_at) : (cDate || null);
+      if (rDate && !isNaN(rDate.getTime())) {
+        if (rDate < monday) {
+          priorResolved += 1;
+        } else {
+          const d = rDate.getDay();
+          const idx = d === 0 ? 6 : d - 1;
+          if (idx >= 0 && idx < 7) {
+            resolvedDaily[idx] += 1;
+          }
+        }
+      }
+    }
+  });
+
+  let accCreated = priorCreated;
+  let accResolved = priorResolved;
+  const seriesA = createdDaily.map(cnt => {
+    accCreated += cnt;
+    return accCreated;
+  });
+  const seriesB = resolvedDaily.map(cnt => {
+    accResolved += cnt;
+    return accResolved;
+  });
 
   const getPriorityStyle = (priority: TaskPriority) => {
     switch (priority) {
@@ -452,7 +510,7 @@ export default function DashboardOverviewPage() {
                     <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{t.description}</div>
                   </div>
                   <span style={{ fontSize: '0.6875rem', fontWeight: 700, padding: '2px 8px', borderRadius: '9999px', background: '#e2e8f0' }}>
-                    {t.members_count || 4} members
+                    {(memberships || []).filter(m => m.team_id === t.id).length || 1} {((memberships || []).filter(m => m.team_id === t.id).length || 1) === 1 ? 'member' : 'members'}
                   </span>
                 </div>
               ))}
@@ -461,7 +519,7 @@ export default function DashboardOverviewPage() {
 
           <div className="card" style={{ padding: '22px 24px' }}>
             <h3 style={{ fontSize: '1.125rem', fontWeight: 700, marginBottom: '12px' }}>Department Sprint Velocity</h3>
-            <SpeedometerGauge score={85.5} label="Department Health" />
+            <SpeedometerGauge score={deptVelocityScore} label={deptTotalTasks > 0 ? "Department Health" : "No Tasks Active"} />
           </div>
         </div>
       </div>
@@ -584,15 +642,15 @@ export default function DashboardOverviewPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '0.75rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#1d4ed8' }} />
-                <span style={{ color: '#475569', fontWeight: 600 }}>Tasks Created</span>
+                <span style={{ color: '#475569', fontWeight: 600 }}>Tasks Created ({totalTasks})</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#10b981' }} />
-                <span style={{ color: '#475569', fontWeight: 600 }}>Resolved</span>
+                <span style={{ color: '#475569', fontWeight: 600 }}>Resolved ({doneTasks})</span>
               </div>
             </div>
           </div>
-          <DualBezierChart />
+          <DualBezierChart seriesA={seriesA} seriesB={seriesB} labels={weekDays} />
         </div>
 
         {/* Right: 180° Speedometer Dial & Health */}
@@ -605,11 +663,11 @@ export default function DashboardOverviewPage() {
             <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Deliverability & Throughput</span>
           </div>
 
-          <SpeedometerGauge score={94.2} label="Deliverability Health" />
+          <SpeedometerGauge score={velocityScore} label={totalTasks > 0 ? "Deliverability Health" : "No Tasks Active"} />
 
           <div style={{ width: '100%', borderTop: '1px solid #e5e7eb', marginTop: '16px', paddingTop: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-around' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <CircularProgressRing pct={completionRate || 40} size={50} strokeWidth={5} strokeColor="#10b981" />
+              <CircularProgressRing pct={completionRate} size={50} strokeWidth={5} strokeColor="#10b981" />
               <div>
                 <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#111827' }}>Sprint Done</div>
                 <div style={{ fontSize: '0.6875rem', color: '#64748b' }}>{doneTasks} of {totalTasks} tasks</div>
@@ -679,7 +737,7 @@ export default function DashboardOverviewPage() {
                       color: '#475569'
                     }}
                   >
-                    {dept.members_count || 12} members
+                    {(memberships || []).filter(m => m.department_id === dept.id).length || 1} {((memberships || []).filter(m => m.department_id === dept.id).length || 1) === 1 ? 'member' : 'members'}
                   </span>
                   <Link
                     href="/departments"
