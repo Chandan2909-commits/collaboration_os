@@ -1,0 +1,113 @@
+:root {
+  /* ============================================================
+     Surfaces & Canvas (Light Mode High Contrast - ONIX Executive)
+     ============================================================ */
+  --background: #ffffff;
+  --foreground: #111827;
+  --bg-app: #f8f9fa;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f4f5f7;
+  --bg-sidebar: #ffffff;
+
+  /* ============================================================
+     Brand & Contrast (Onyx Black Engine)
+     ============================================================ */
+  --primary: #1e1e1e;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f5f7;
+  --secondary-foreground: #1e1e1e;
+  --color-brand: #1e1e1e;
+  --color-brand-hover: #111111;
+  --color-brand-light: #f4f5f7;
+  --color-brand-glow: rgba(0, 0, 0, 0.08);
+
+  /* ============================================================
+     The Single Surprise Highlight Accent (Sapphire / Royal Blue)
+     ============================================================ */
+  --color-accent: #1d4ed8;
+  --color-accent-hover: #1e40af;
+  --color-accent-light: #eff6ff;
+  --color-accent-glow: rgba(29, 78, 216, 0.15);
+  --ring: #1d4ed8;
+
+  /* ============================================================
+     Text Hierarchy
+     ============================================================ */
+  --text-primary: #111827;
+  --text-secondary: #475569;
+  --text-muted: #6b7280;
+  --text-disabled: #9ca3af;
+  --text-inverse: #ffffff;
+
+  /* ============================================================
+     Borders & Dividers
+     ============================================================ */
+  --border: #e5e7eb;
+  --border-subtle: #e5e7eb;
+  --border-strong: #d1d5db;
+  --input: #e5e7eb;
+
+  /* ============================================================
+     Status Indicators
+     ============================================================ */
+  --color-success: #10b981;
+  --color-success-light: #ecfdf5;
+  --color-warning: #f59e0b;
+  --color-warning-light: #fef3c7;
+  --color-danger: #ef4444;
+  --color-danger-light: #fee2e2;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --color-info: #1d4ed8;
+  --color-info-light: #eff6ff;
+
+  /* ============================================================
+     Geometry & Soft Radius Scale
+     ============================================================ */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius: 16px;
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+  --radius-pill: 9999px;
+
+  /* ============================================================
+     Typography Tokens
+     ============================================================ */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-body: var(--font-sans);
+  --font-heading: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-family-heading: var(--font-heading);
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --font-size-xs: 0.75rem;    /* 12px */
+  --font-size-sm: 0.84375rem; /* 13.5px */
+  --font-size-base: 0.9375rem;/* 15px */
+  --font-size-lg: 1.125rem;   /* 18px */
+  --font-size-xl: 1.25rem;    /* 20px */
+  --font-size-2xl: 1.5rem;    /* 24px */
+  --font-size-3xl: 1.875rem;  /* 30px */
+
+  /* ============================================================
+     Ambient Multi-Stop Shadow System
+     ============================================================ */
+  --shadow-2xs: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+  --shadow-xs: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 2px 4px 0 rgba(15, 23, 42, 0.03);
+  --shadow-md: 0 8px 30px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.01);
+  --shadow-lg: 0 16px 40px rgba(15, 23, 42, 0.06), 0 4px 8px rgba(15, 23, 42, 0.02);
+  --shadow-xl: 0 32px 64px rgba(15, 23, 42, 0.08), 0 8px 16px rgba(15, 23, 42, 0.03);
+  --shadow-brand: 0 4px 12px rgba(0, 0, 0, 0.12);
+
+  /* ============================================================
+     Z-Index Hierarchy
+     ============================================================ */
+  --z-app: 1;
+  --z-sidebar: 10;
+  --z-topbar: 20;
+  --z-dropdown: 30;
+  --z-overlay: 9999;
+  --z-modal: 10002;
+  --z-toast: 10005;
+}

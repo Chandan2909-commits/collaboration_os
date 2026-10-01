@@ -1,0 +1,576 @@
+/* ============================================================
+   TOPBAR RUNNING PROGRESS LOADER
+   ============================================================ */
+#topbar-loader-line {
+  position: absolute;
+  bottom: 0;
+  left: 16px;
+  right: 16px;
+  height: 3px;
+  border-bottom-left-radius: 20px;
+  border-bottom-right-radius: 20px;
+  background: linear-gradient(90deg, #3b82f6, #6366f1, #06b6d4, #3b82f6);
+  background-size: 200% 100%;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+  z-index: 100;
+}
+
+#topbar-loader-line.loading {
+  opacity: 1;
+  animation: runningLoader 1s linear infinite;
+}
+
+@keyframes runningLoader {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ============================================================
+   ONIX GLOBAL HERO CARD (Subtle Dark Blue Gradient System)
+   ============================================================ */
+.panel-hero-card {
+  position: relative;
+  background: linear-gradient(135deg, #0b1120 0%, #111827 42%, #172554 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 24px 28px;
+  color: #ffffff;
+  box-shadow: 0 12px 32px -4px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(29, 78, 216, 0.15);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+/* Ambient Radial Glow in Top Right Corner */
+.panel-hero-card::before {
+  content: '';
+  position: absolute;
+  top: -40%;
+  right: -10%;
+  width: 340px;
+  height: 340px;
+  background: radial-gradient(circle, rgba(29, 78, 216, 0.25) 0%, rgba(29, 78, 216, 0) 70%);
+  pointer-events: none;
+  border-radius: 50%;
+}
+
+/* Uppercase Micro Pill Badge */
+.panel-hero-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #e2e8f0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+/* Montserrat 800 ExtraBold Heading */
+.panel-hero-title {
+  font-family: var(--font-heading, 'Montserrat', sans-serif);
+  font-size: 1.625rem; /* 26px */
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  margin: 0;
+}
+
+/* Inter Subtitle Description */
+.panel-hero-desc {
+  font-family: var(--font-sans, 'Inter', sans-serif);
+  font-size: 0.875rem; /* 14px */
+  color: #94a3b8;
+  font-weight: 400;
+  margin: 6px 0 0 0;
+  line-height: 1.45;
+  max-width: 680px;
+}
+
+/* Action Button Container */
+.panel-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* Pure White Pill CTA Button */
+.panel-hero-card .btn-hero-primary,
+.panel-hero-card .btn-primary {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #ffffff !important;
+  border-radius: 9999px !important;
+  font-weight: 700 !important;
+  padding: 8px 18px !important;
+  font-size: 13px !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+  text-decoration: none !important;
+}
+
+.panel-hero-card .btn-hero-primary:hover,
+.panel-hero-card .btn-primary:hover {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* Translucent Glass Secondary Button */
+.panel-hero-card .btn-hero-secondary,
+.panel-hero-card .btn-secondary,
+.panel-hero-card .btn-outline,
+.panel-hero-card .btn-ghost {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 9999px !important;
+  font-weight: 600 !important;
+  padding: 8px 16px !important;
+  font-size: 13px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  cursor: pointer !important;
+  backdrop-filter: blur(8px) !important;
+  transition: all 0.15s ease !important;
+  text-decoration: none !important;
+}
+
+.panel-hero-card .btn-hero-secondary:hover,
+.panel-hero-card .btn-secondary:hover,
+.panel-hero-card .btn-outline:hover,
+.panel-hero-card .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  color: #ffffff !important;
+  transform: translateY(-1px) !important;
+}
+
+/* ============================================================
+   BUTTON PRIMITIVES & MICRO-INTERACTION PHYSICS
+   ============================================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  font-family: var(--font-family-body);
+  font-weight: 700;
+  font-size: 0.84375rem;
+  padding: 8px 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  border: 1px solid transparent;
+  outline: none;
+  white-space: nowrap;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.btn:hover svg,
+.btn:hover i {
+  transform: scale(1.05);
+  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #1d4ed8;
+}
+
+/* Variant 1: Primary Onyx */
+.btn-primary,
+.btn-default {
+  background: #1e1e1e !important;
+  color: #ffffff !important;
+  border: 1px solid #1e1e1e !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12) !important;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #111111 !important;
+  border-color: #111111 !important;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22) !important;
+}
+
+/* Variant 2: Secondary Light */
+.btn-secondary {
+  background: #f4f5f7 !important;
+  color: #1e1e1e !important;
+  border: 1px solid #e5e7eb !important;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #e5e7eb !important;
+  color: #111111 !important;
+}
+
+/* Variant 3: Outline White */
+.btn-outline {
+  border: 1px solid #e5e7eb !important;
+  background: #ffffff !important;
+  color: #1e1e1e !important;
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: #f4f5f7 !important;
+  border-color: #d1d5db !important;
+}
+
+/* Variant 4: Ghost */
+.btn-ghost {
+  background: transparent !important;
+  color: #374151 !important;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: #f4f5f7 !important;
+  color: #111827 !important;
+}
+
+/* Variant 5: Destructive */
+.btn-destructive,
+.btn-danger {
+  background: #ef4444 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.18) !important;
+}
+
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 0.75rem;
+}
+
+.btn-lg {
+  padding: 10px 22px;
+  font-size: 0.9375rem;
+}
+
+/* ============================================================
+   STANDARD SAAS CARDS & CONTAINERS
+   ============================================================ */
+.card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+  transition: all 150ms ease;
+  position: relative;
+}
+
+.card-hover:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.card-module {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 150ms ease;
+}
+
+.card-module:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  border-color: #cbd5e1;
+}
+
+/* ============================================================
+   NESTED SETTINGS 2-PANE NAVIGATION SYSTEM
+   ============================================================ */
+.settings-container {
+  display: flex;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  overflow: hidden;
+  min-height: 620px;
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05);
+}
+
+.settings-sidebar {
+  width: 250px;
+  background: #f8fafc;
+  border-right: 1px solid #e2e8f0;
+  padding: 20px 14px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.settings-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.settings-nav-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: transparent;
+  color: #475569;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: left;
+}
+
+.settings-nav-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.settings-nav-btn.active {
+  background: #0f172a !important;
+  color: #ffffff !important;
+  border-color: #0f172a;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+}
+
+.settings-nav-btn.active svg,
+.settings-nav-btn.active i {
+  color: #ffffff !important;
+}
+
+.settings-nav-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.settings-nav-btn.active .settings-nav-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.settings-content-pane {
+  flex: 1;
+  padding: 28px 36px;
+  overflow-y: auto;
+  background: #ffffff;
+}
+
+.settings-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 24px 28px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  margin-bottom: 24px;
+  transition: border-color 0.15s ease;
+}
+
+.settings-card:hover {
+  border-color: #cbd5e1;
+}
+
+.settings-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.settings-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #475569;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.settings-input {
+  height: 42px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 0 14px;
+  color: #0f172a;
+  outline: none;
+  transition: all 0.15s ease;
+  width: 100%;
+}
+
+.settings-input:focus {
+  background: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/* ============================================================
+   MODAL DIALOG ARCHITECTURE & SPRING ANIMATION
+   ============================================================ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.modal-card-container {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 32px 64px rgba(15, 23, 42, 0.2);
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 3rem);
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+  animation: modalSpring 350ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.modal-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-card-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+.modal-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 14px 24px;
+  border-top: 1px solid #e2e8f0;
+  gap: 10px;
+  background: #fafafa;
+}
+
+/* ============================================================
+   BADGES & CHIPS
+   ============================================================ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.badge-owner {
+  background: #1e1e1e;
+  color: #ffffff;
+  border: 1px solid #1e1e1e;
+}
+
+.badge-admin {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #dbeafe;
+}
+
+.badge-manager {
+  background: #f5f3ff;
+  color: #7c3aed;
+  border: 1px solid #ddd6fe;
+}
+
+.badge-lead {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.badge-member {
+  background: #f4f5f7;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+}
+
+.badge-urgent {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.badge-high {
+  background: #ffedd5;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+
+.badge-medium {
+  background: #fef9c3;
+  color: #854d0e;
+  border: 1px solid #fef08a;
+}
+
+.badge-low {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #dbeafe;
+}
+
+/* Avatar element */
+.avatar {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #ffffff;
+  background: #1e1e1e;
+  flex-shrink: 0;
+}
