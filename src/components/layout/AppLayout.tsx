@@ -16,7 +16,7 @@ import { CompanyOnboarding } from '../onboarding/CompanyOnboarding';
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { hasActiveOrganization } = useApp();
+  const { hasActiveOrganization, isInitialLoading } = useApp();
   const isAuthPage = pathname?.startsWith('/sign-in') || pathname?.startsWith('/sign-up') || pathname?.startsWith('/invite');
 
   if (isAuthPage) {
@@ -33,6 +33,58 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         }}
       >
         {children}
+      </div>
+    );
+  }
+
+  // Show clean branded loading indicator while validating user & fetching workspace
+  if (isInitialLoading) {
+    return (
+      <div
+        style={{
+          width: '100vw',
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#090d16',
+          color: '#ffffff'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+          <div
+            style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '10px',
+              background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 800,
+              fontSize: '20px',
+              color: '#ffffff',
+              boxShadow: '0 8px 24px rgba(37, 99, 235, 0.45)'
+            }}
+          >
+            CT
+          </div>
+          <span style={{ fontSize: '22px', fontWeight: 700, letterSpacing: '-0.02em' }}>CrossTech OS</span>
+        </div>
+        <div
+          style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '50%',
+            border: '3px solid rgba(255, 255, 255, 0.12)',
+            borderTopColor: '#3b82f6',
+            animation: 'ctSpin 0.75s linear infinite',
+            marginBottom: '14px'
+          }}
+        />
+        <style>{`@keyframes ctSpin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+        <p style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 500, letterSpacing: '0.01em' }}>Connecting to your workspace...</p>
       </div>
     );
   }

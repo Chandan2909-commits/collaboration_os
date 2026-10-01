@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { useUser } from '@clerk/nextjs';
 import { isClerkConfigured } from './clerk';
 import { DEFAULT_BOARD_COLUMNS } from './store';
+import { syncUserAndFetchWorkspace, createOrgInSupabase } from './sync';
 import {
   Organization,
   User,
@@ -39,6 +40,7 @@ interface AppContextType {
   userOrganizations: Organization[];
   currentOrg: Organization;
   hasActiveOrganization: boolean;
+  isInitialLoading: boolean;
   setCurrentOrg: (org: Organization) => void;
   createOrganization: (name: string, slug: string) => Organization;
   createInitialCompany: (data: { name: string; slug: string; departmentName: string }) => Organization;
@@ -145,13 +147,17 @@ export function decodeInviteToken(token: string): {
   return null;
 }
 
-function ClerkUserSync({ onSync }: { onSync: (user: any) => void }) {
+function ClerkUserSync({ onSync, onDoneLoading }: { onSync: (user: any) => Promise<void>; onDoneLoading: () => void }) {
   const { user, isLoaded } = useUser();
   useEffect(() => {
-    if (isLoaded && user) {
-      onSync(user);
+    if (isLoaded) {
+      if (user) {
+        onSync(user).finally(() => onDoneLoading());
+      } else {
+        onDoneLoading();
+      }
     }
-  }, [isLoaded, user, onSync]);
+  }, [isLoaded, user, onSync, onDoneLoading]);
   return null;
 }
 
@@ -161,6 +167,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   
   const [users, setUsers] = useState<User[]>([]);
   const [memberships, setMemberships] = useState<OrganizationMembership[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [board, setBoard] = useState<Board>(SEED_BOARD);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [activeChannel, setActiveChannel] = useState<Channel>({ id: 'chan_general', organization_id: '', name: 'general', type: 'PUBLIC' });
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   
   const [currentUser, setCurrentUserState] = useState<User & { role: UserRole }>({
     id: 'usr_init',
@@ -178,6 +195,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (Array.isArray(parsed) && parsed.length > 0) {
           setOrganizations(parsed);
           setCurrentOrgState(parsed[0]);
+          setIsInitialLoading(false);
         }
       }
       const savedMems = localStorage.getItem('crosstech_memberships');
@@ -197,39 +215,149 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.warn('Failed to load saved state from localStorage:', e);
     }
+    if (!isClerkConfigured) {
+      setIsInitialLoading(false);
+    }
   }, []);
 
-  const handleClerkUserSync = useCallback((clerkUser: any) => {
+  // Continuous localStorage persistence
+  useEffect(() => {
+    if (tasks.length > 0) {
+      try { localStorage.setItem('crosstech_tasks', JSON.stringify(tasks)); } catch {}
+    }
+  }, [tasks]);
+
+  useEffect(() => {
+    if (departments.length > 0) {
+      try { localStorage.setItem('crosstech_depts', JSON.stringify(departments)); } catch {}
+    }
+  }, [departments]);
+
+  useEffect(() => {
+    if (teams.length > 0) {
+      try { localStorage.setItem('crosstech_teams', JSON.stringify(teams)); } catch {}
+    }
+  }, [teams]);
+
+  useEffect(() => {
+    if (memberships.length > 0) {
+      try { localStorage.setItem('crosstech_memberships', JSON.stringify(memberships)); } catch {}
+    }
+  }, [memberships]);
+
+  useEffect(() => {
+    if (channels.length > 0) {
+      try { localStorage.setItem('crosstech_channels', JSON.stringify(channels)); } catch {}
+    }
+  }, [channels]);
+
+  const handleClerkUserSync = useCallback(async (clerkUser: any) => {
     const userEmail = clerkUser.primaryEmailAddress?.emailAddress || '';
     const userFullName = clerkUser.fullName || clerkUser.firstName || clerkUser.username || 'Workspace Owner';
     const userId = clerkUser.id;
     const userAvatar = clerkUser.imageUrl;
 
-    setCurrentUserState(prev => ({
-      id: userId,
-      email: userEmail,
-      full_name: userFullName,
-      avatar_url: userAvatar,
-      role: prev.role || 'ORGANIZATION_OWNER',
-      status: 'ACTIVE'
-    }));
+    try {
+      const wsData = await syncUserAndFetchWorkspace(userEmail, userId, userFullName, userAvatar);
+      if (wsData) {
+        const resolvedUserId = wsData.user?.id || userId;
 
-    setUsers(prev => {
-      const existing = prev.find(u => u.id === userId || u.email === userEmail);
-      if (!existing) {
-        return [{ id: userId, email: userEmail, full_name: userFullName, avatar_url: userAvatar, status: 'ACTIVE' }, ...prev];
+        setCurrentUserState(prev => ({
+          id: resolvedUserId,
+          email: userEmail,
+          full_name: userFullName,
+          avatar_url: userAvatar,
+          role: wsData.memberships?.[0]?.role || prev.role || 'ORGANIZATION_OWNER',
+          status: 'ACTIVE'
+        }));
+
+        setUsers(prev => {
+          const uObj: User = {
+            id: resolvedUserId,
+            email: userEmail,
+            full_name: userFullName,
+            avatar_url: userAvatar,
+            status: 'ACTIVE'
+          };
+          const existing = prev.find(u => u.id === resolvedUserId || u.email === userEmail);
+          if (!existing) return [uObj, ...prev];
+          return prev.map(u => (u.id === resolvedUserId || u.email === userEmail ? { ...u, ...uObj } : u));
+        });
+
+        if (wsData.organizations && wsData.organizations.length > 0) {
+          setOrganizations(wsData.organizations);
+          setCurrentOrgState(wsData.organizations[0]);
+          try {
+            localStorage.setItem('crosstech_orgs', JSON.stringify(wsData.organizations));
+          } catch {}
+        }
+
+        if (wsData.memberships && wsData.memberships.length > 0) {
+          setMemberships(wsData.memberships);
+          try {
+            localStorage.setItem('crosstech_memberships', JSON.stringify(wsData.memberships));
+          } catch {}
+        }
+
+        if (wsData.departments && wsData.departments.length > 0) {
+          setDepartments(wsData.departments);
+          try {
+            localStorage.setItem('crosstech_depts', JSON.stringify(wsData.departments));
+          } catch {}
+        }
+
+        if (wsData.teams && wsData.teams.length > 0) {
+          setTeams(wsData.teams);
+          try {
+            localStorage.setItem('crosstech_teams', JSON.stringify(wsData.teams));
+          } catch {}
+        }
+
+        if (wsData.tasks) {
+          setTasks(wsData.tasks);
+          try {
+            localStorage.setItem('crosstech_tasks', JSON.stringify(wsData.tasks));
+          } catch {}
+        }
+
+        if (wsData.boards && wsData.boards.length > 0) {
+          setBoard(wsData.boards[0]);
+        }
+
+        if (wsData.channels && wsData.channels.length > 0) {
+          setChannels(wsData.channels);
+          setActiveChannel(wsData.channels[0]);
+          try {
+            localStorage.setItem('crosstech_channels', JSON.stringify(wsData.channels));
+          } catch {}
+        }
+      } else {
+        setCurrentUserState(prev => ({
+          id: userId,
+          email: userEmail,
+          full_name: userFullName,
+          avatar_url: userAvatar,
+          role: prev.role || 'ORGANIZATION_OWNER',
+          status: 'ACTIVE'
+        }));
       }
-      return prev;
-    });
-
-    setMemberships(prev =>
-      prev.map(m => (m.user_id === 'usr_init' || m.user_id === userId ? { ...m, user_id: userId } : m))
-    );
+    } catch (err) {
+      console.warn('Failed to sync workspace with Supabase:', err);
+    } finally {
+      setIsInitialLoading(false);
+    }
   }, []);
 
   // Multi-Tenant Isolation: Only show organizations the user has active membership in!
   const userOrganizations = organizations.filter(org =>
-    memberships.some(m => m.organization_id === org.id && (m.user_id === currentUser.id || m.user_id === 'usr_init'))
+    memberships.some(m =>
+      m.organization_id === org.id &&
+      (
+        m.user_id === currentUser.id ||
+        m.user_id === 'usr_init' ||
+        (m.user?.email && currentUser.email && m.user.email.toLowerCase() === currentUser.email.toLowerCase())
+      )
+    )
   );
 
   const hasActiveOrganization = userOrganizations.length > 0;
@@ -237,20 +365,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Calculate current membership
   const currentUserMembership = memberships.find(
-    m => (m.user_id === currentUser.id || m.user_id === 'usr_init') && m.organization_id === currentOrg.id
+    m =>
+      (
+        m.user_id === currentUser.id ||
+        m.user_id === 'usr_init' ||
+        (m.user?.email && currentUser.email && m.user.email.toLowerCase() === currentUser.email.toLowerCase())
+      ) &&
+      m.organization_id === currentOrg.id
   );
   const effectiveRole: UserRole = currentUserMembership?.role || currentUser.role;
-
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [board, setBoard] = useState<Board>(SEED_BOARD);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [activeChannel, setActiveChannel] = useState<Channel>({ id: 'chan_general', organization_id: '', name: 'general', type: 'PUBLIC' });
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -442,7 +565,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       created_by: currentUser.id,
       created_at: new Date().toISOString()
     };
-    setOrganizations(prev => [...prev, newOrg]);
+    const nextOrgs = [...organizations, newOrg];
+    setOrganizations(nextOrgs);
     setCurrentOrgState(newOrg);
 
     // Automatically create OWNER membership for creator
@@ -452,10 +576,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       user_id: currentUser.id,
       role: 'ORGANIZATION_OWNER',
       status: 'ACTIVE',
-      joined_at: new Date().toISOString()
+      joined_at: new Date().toISOString(),
+      user: currentUser,
+      organization: newOrg
     };
-    setMemberships(prev => [...prev, ownerMembership]);
+    const nextMems = [...memberships, ownerMembership];
+    setMemberships(nextMems);
     setCurrentUserState(prev => ({ ...prev, role: 'ORGANIZATION_OWNER' }));
+
+    try {
+      localStorage.setItem('crosstech_orgs', JSON.stringify(nextOrgs));
+      localStorage.setItem('crosstech_memberships', JSON.stringify(nextMems));
+    } catch {}
+
+    createOrgInSupabase({
+      userId: currentUser.id,
+      email: currentUser.email,
+      fullName: currentUser.full_name,
+      name,
+      slug: slug || name.toLowerCase().replace(/[^a-z0-9]/g, '-')
+    }).catch(err => console.warn('Supabase sync warning for organization:', err));
 
     // Audit log
     setAuditLogs(prev => [
@@ -568,6 +708,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.warn('Failed to save company to localStorage:', e);
     }
+
+    createOrgInSupabase({
+      userId: currentUser.id,
+      email: currentUser.email,
+      fullName: currentUser.full_name,
+      name: data.name,
+      slug: data.slug || data.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      departmentName: data.departmentName
+    }).then(res => {
+      if (res?.org) {
+        console.log('Saved new organization to Supabase:', res.org.name);
+      }
+    }).catch(err => {
+      console.warn('Failed to persist created org to Supabase:', err);
+    });
 
     return newOrg;
   };
@@ -962,6 +1117,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         userOrganizations,
         currentOrg,
         hasActiveOrganization,
+        isInitialLoading,
         setCurrentOrg,
         createOrganization,
         createInitialCompany,
@@ -1020,7 +1176,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         triggerLoader
       }}
     >
-      {isClerkConfigured && <ClerkUserSync onSync={handleClerkUserSync} />}
+      {isClerkConfigured && (
+        <ClerkUserSync
+          onSync={handleClerkUserSync}
+          onDoneLoading={() => setIsInitialLoading(false)}
+        />
+      )}
       {children}
     </AppContext.Provider>
   );
