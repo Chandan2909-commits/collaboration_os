@@ -5,7 +5,7 @@ import { X, Building2 } from 'lucide-react';
 import { useApp } from '@/lib/AppContext';
 
 export function CreateDeptModal() {
-  const { isCreateDeptModalOpen, setIsCreateDeptModalOpen, addDepartment, users, currentUser } = useApp();
+  const { isCreateDeptModalOpen, setIsCreateDeptModalOpen, addDepartment, users, currentUser, isOwnerOrAdmin } = useApp();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [managerId, setManagerId] = useState('');
@@ -18,7 +18,7 @@ export function CreateDeptModal() {
     }
   }, [isCreateDeptModalOpen, currentUser?.id, users]);
 
-  if (!isCreateDeptModalOpen) return null;
+  if (!isCreateDeptModalOpen || !isOwnerOrAdmin) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

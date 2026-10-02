@@ -19,9 +19,9 @@ import { useApp } from '@/lib/AppContext';
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { sidebarCollapsed, toggleSidebar, setIsCommandPaletteOpen, currentOrg } = useApp();
+  const { sidebarCollapsed, toggleSidebar, isOwnerOrAdmin, setIsCommandPaletteOpen } = useApp();
 
-  const navItems = [
+  const allNavItems = [
     { label: 'Overview', icon: LayoutDashboard, href: '/' },
     { label: 'Departments', icon: Building2, href: '/departments' },
     { label: 'Teams', icon: UsersRound, href: '/teams' },
@@ -30,6 +30,10 @@ export function Sidebar() {
     { label: 'Members & Roles', icon: UserCheck, href: '/members' },
     { label: 'Settings & Audit', icon: Settings, href: '/settings' }
   ];
+
+  const navItems = isOwnerOrAdmin
+    ? allNavItems
+    : allNavItems.filter(item => item.href === '/' || item.href === '/chat' || item.href === '/kanban');
 
   return (
     <aside

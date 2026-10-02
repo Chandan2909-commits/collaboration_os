@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   MessageSquare,
   Hash,
@@ -34,8 +34,22 @@ export default function ChatPage() {
   const [newChanName, setNewChanName] = useState('');
   const [newChanType, setNewChanType] = useState<Channel['type']>('PUBLIC');
   const [newChanDesc, setNewChanDesc] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const channelMessages = messages.filter(m => m.channel_id === activeChannel.id);
+  const channelMessages = messages.filter(m => {
+    if (m.channel_id === activeChannel.id) return true;
+    if (
+      (activeChannel.name === 'general' || activeChannel.id === 'chan_general' || activeChannel.id === '569319cf-f386-493d-9749-db01a5fef87a') &&
+      (m.channel_id === 'chan_general' || m.channel_id === '569319cf-f386-493d-9749-db01a5fef87a')
+    ) {
+      return true;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [channelMessages.length]);
 
   const orgChannels = channels.filter(c => !c.department_id && !c.team_id && c.type !== 'DIRECT');
   const deptChannels = channels.filter(c => c.department_id && !c.team_id);
@@ -389,6 +403,7 @@ export default function ChatPage() {
               );
             })
           )}
+          <div ref={messagesEndRef} />
         </div>
 
         {/* Input Message Bar */}

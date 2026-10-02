@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import {
   UserCheck,
   UserPlus,
@@ -11,11 +12,12 @@ import {
   Search,
   Building2,
   Trash2,
-  Lock
+  Lock,
+  ShieldAlert
 } from 'lucide-react';
 import { useApp } from '@/lib/AppContext';
 import { SignatureHero } from '@/components/layout/SignatureHero';
-import { getRoleBadgeStyle } from '@/lib/rbac';
+import { getRoleBadgeStyle, isOrganizationCreator } from '@/lib/rbac';
 import { UserRole } from '@/lib/types';
 
 export default function MembersPage() {
@@ -30,13 +32,29 @@ export default function MembersPage() {
     updateMemberRole,
     updateMemberDepartment,
     removeMember,
-    setIsInviteModalOpen
+    setIsInviteModalOpen,
+    isOwnerOrAdmin
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
-  const isOwnerOrAdmin = currentUser.role === 'ORGANIZATION_OWNER' || currentUser.role === 'ORGANIZATION_ADMIN';
+  if (!isOwnerOrAdmin) {
+    return (
+      <div className="animate-page-enter" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', textAlign: 'center', padding: '24px' }}>
+        <div style={{ width: 56, height: 56, borderRadius: '16px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', color: '#dc2626' }}>
+          <ShieldAlert style={{ width: 28, height: 28 }} />
+        </div>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#111827', marginBottom: '8px' }}>Access Restricted</h2>
+        <p style={{ fontSize: '0.9375rem', color: '#64748b', maxWidth: '440px', lineHeight: 1.6, marginBottom: '24px' }}>
+          Only the Super Owner and Organization Admins have permission to view and manage directory members and access roles.
+        </p>
+        <Link href="/" className="btn btn-primary" style={{ padding: '8px 20px', borderRadius: '9999px' }}>
+          Return to Overview
+        </Link>
+      </div>
+    );
+  }
 
   // Multi-Tenant Isolation: Only show members who belong to currentOrg!
   const orgMemberships = memberships.filter(m => m.organization_id === currentOrg.id);
@@ -156,7 +174,8 @@ export default function MembersPage() {
           <tbody>
             {filteredUsers.map(u => {
               const mem = orgMemberships.find(m => m.user_id === u.id);
-              const userRole: UserRole = mem?.role || 'TEAM_MEMBER';
+              const isCreator = isOrganizationCreator(currentOrg, u);
+              const userRole: UserRole = isCreator ? 'ORGANIZATION_OWNER' : (mem?.role || 'TEAM_MEMBER');
               const roleStyle = getRoleBadgeStyle(userRole);
               const dept = departments.find(d => d.id === mem?.department_id);
               const isSelf = u.id === currentUser.id;
@@ -186,17 +205,54 @@ export default function MembersPage() {
                         {u.full_name.charAt(0)}
                       </div>
                       <div>
-                        <div style={{ fontSize: '0.84375rem', fontWeight: 700, color: '#0f172a' }}>
-                          {u.full_name} {isSelf && <span style={{ fontSize: '0.6875rem', color: '#1d4ed8', fontWeight: 600 }}>(You)</span>}
+                        <div style={{ fontSize: '0.84375rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>{u.full_name}</span>
+                          {isSelf && <span style={{ fontSize: '0.6875rem', color: '#1d4ed8', fontWeight: 600 }}>(You)</span>}
+                          {isCreator && (
+                            <span
+                              style={{
+                                fontSize: '0.625rem',
+                                fontWeight: 800,
+                                color: '#b45309',
+                                background: '#fef3c7',
+                                border: '1px solid #fde68a',
+                                padding: '1px 6px',
+                                borderRadius: '4px'
+                              }}
+                            >
+                              CREATOR
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{u.email}</div>
                       </div>
                     </div>
                   </td>
 
-                  {/* RBAC Role Column: Interactive Select for Owner, Static for others */}
+                  {/* RBAC Role Column: Permanent for Creator, Interactive Select for Others */}
                   <td style={{ padding: '14px 18px' }}>
-                    {isOwnerOrAdmin && !isSelf ? (
+                    {isCreator ? (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          fontSize: '0.6875rem',
+                          fontWeight: 800,
+                          padding: '4px 11px',
+                          borderRadius: '9999px',
+                          background: '#1e1e1e',
+                          color: '#ffffff',
+                          border: '1px solid #1e1e1e',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em'
+                        }}
+                        title="The organization creator must always remain as the Super Owner."
+                      >
+                        <Shield style={{ width: 11, height: 11, color: '#fbbf24' }} />
+                        <span>Super Owner (Permanent)</span>
+                      </span>
+                    ) : isOwnerOrAdmin && !isSelf ? (
                       <select
                         value={userRole}
                         onChange={e => updateMemberRole(u.id, e.target.value as UserRole)}
@@ -232,7 +288,7 @@ export default function MembersPage() {
                           letterSpacing: '0.04em'
                         }}
                       >
-                        {roleStyle.label} {isSelf && userRole === 'ORGANIZATION_OWNER' ? '(Primary)' : ''}
+                        {roleStyle.label}
                       </span>
                     )}
                   </td>
@@ -286,7 +342,24 @@ export default function MembersPage() {
 
                   {/* Actions Column */}
                   <td style={{ padding: '14px 18px' }}>
-                    {isOwnerOrAdmin && !isSelf ? (
+                    {isCreator ? (
+                      <span
+                        style={{
+                          fontSize: '0.6875rem',
+                          fontWeight: 700,
+                          color: '#475569',
+                          background: '#f1f5f9',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        <Lock style={{ width: 11, height: 11, color: '#64748b' }} />
+                        <span>Permanent</span>
+                      </span>
+                    ) : isOwnerOrAdmin && !isSelf ? (
                       <button
                         type="button"
                         onClick={() => {

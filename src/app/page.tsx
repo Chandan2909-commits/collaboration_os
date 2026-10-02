@@ -36,11 +36,12 @@ export default function DashboardOverviewPage() {
     auditLogs,
     moveTask,
     setIsInviteModalOpen,
-    setIsTaskModalOpen
+    setIsTaskModalOpen,
+    isOwnerOrAdmin
   } = useApp();
 
-  const isExecutive = currentUser.role === 'ORGANIZATION_OWNER' || currentUser.role === 'ORGANIZATION_ADMIN';
-  const isManager = currentUser.role === 'DEPARTMENT_MANAGER';
+  const isExecutive = isOwnerOrAdmin;
+  const isManager = !isExecutive && currentUser.role === 'DEPARTMENT_MANAGER';
   const isEmployee = !isExecutive && !isManager;
 
   // Department scoping
@@ -500,7 +501,7 @@ export default function DashboardOverviewPage() {
           <div className="card" style={{ padding: '22px 24px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
               <h3 style={{ fontSize: '1.125rem', fontWeight: 700 }}>Department Teams & Pods</h3>
-              <Link href="/teams" className="btn btn-secondary btn-sm">Manage Teams</Link>
+              <Link href="/kanban" className="btn btn-secondary btn-sm">Sprint Board</Link>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {deptTeams.map(t => (

@@ -178,10 +178,10 @@ export function InviteModal() {
                   onChange={e => setRole(e.target.value as UserRole)}
                 >
                   <option value="TEAM_MEMBER">Team Member (Standard Contributor)</option>
-                  <option value="TEAM_LEAD">Team Lead (Team Task & Channel Admin)</option>
-                  <option value="DEPARTMENT_MANAGER">Department Manager (Manage Teams & Budget)</option>
+                  <option value="TEAM_LEAD">Team Lead (Team Admin & Department Creation)</option>
+                  <option value="DEPARTMENT_MANAGER">Department Manager (Manage Teams & Departments)</option>
                   <option value="ORGANIZATION_ADMIN">Organization Admin</option>
-                  <option value="ORGANIZATION_OWNER">Organization Owner</option>
+                  <option value="ORGANIZATION_OWNER">Super Owner (Organization Owner - Full Access & Deletion)</option>
                 </select>
               </div>
 

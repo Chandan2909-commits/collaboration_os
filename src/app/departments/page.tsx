@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import {
   Building2,
@@ -18,36 +18,33 @@ import { SignatureHero } from '@/components/layout/SignatureHero';
 export default function DepartmentsPage() {
   const {
     departments,
-    deleteDepartment,
     teams,
     users,
-    currentUser,
-    currentUserMembership,
+    canCreateDept,
+    canCreateTeam,
+    isOwnerOrAdmin,
+    isSuperOwner,
+    openDeleteDeptModal,
     setIsCreateDeptModalOpen,
     setIsCreateTeamModalOpen
   } = useApp();
 
-  const isOwnerOrAdmin =
-    currentUser.role === 'ORGANIZATION_OWNER' ||
-    currentUser.role === 'ORGANIZATION_ADMIN' ||
-    currentUserMembership?.role === 'ORGANIZATION_OWNER' ||
-    currentUserMembership?.role === 'ORGANIZATION_ADMIN';
-
-  const [deletingDeptId, setDeletingDeptId] = useState<string | null>(null);
-
-  const handleDeleteDepartment = async (deptId: string, deptName: string) => {
-    if (!window.confirm(`Are you sure you want to delete "${deptName}"?\n\nThis will permanently delete the department, its assigned teams, and discussions.`)) {
-      return;
-    }
-    setDeletingDeptId(deptId);
-    try {
-      await deleteDepartment(deptId);
-    } catch (err) {
-      console.error('Failed to delete department:', err);
-    } finally {
-      setDeletingDeptId(null);
-    }
-  };
+  if (!isOwnerOrAdmin) {
+    return (
+      <div className="animate-page-enter" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', textAlign: 'center', padding: '24px' }}>
+        <div style={{ width: 56, height: 56, borderRadius: '16px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', color: '#dc2626' }}>
+          <ShieldAlert style={{ width: 28, height: 28 }} />
+        </div>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#111827', marginBottom: '8px' }}>Access Restricted</h2>
+        <p style={{ fontSize: '0.9375rem', color: '#64748b', maxWidth: '440px', lineHeight: 1.6, marginBottom: '24px' }}>
+          Only the Super Owner and Organization Admins have permission to view and manage organizational departments.
+        </p>
+        <Link href="/" className="btn btn-primary" style={{ padding: '8px 20px', borderRadius: '9999px' }}>
+          Return to Overview
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="animate-page-enter" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -56,16 +53,24 @@ export default function DepartmentsPage() {
         tag="Organizational Hierarchy"
         title="Departments & Divisions"
         description="Structured division of responsibilities across the enterprise. Each department contains dedicated managers, cross-functional teams, isolated channels, and scoped permissions."
-        primaryAction={{
-          label: 'Create Department',
-          icon: <Plus style={{ width: 14, height: 14 }} />,
-          onClick: () => setIsCreateDeptModalOpen(true)
-        }}
-        secondaryAction={{
-          label: 'Create Team',
-          icon: <UsersRound style={{ width: 14, height: 14 }} />,
-          onClick: () => setIsCreateTeamModalOpen(true)
-        }}
+        primaryAction={
+          canCreateDept
+            ? {
+                label: 'Create Department',
+                icon: <Plus style={{ width: 14, height: 14 }} />,
+                onClick: () => setIsCreateDeptModalOpen(true)
+              }
+            : undefined
+        }
+        secondaryAction={
+          canCreateTeam
+            ? {
+                label: 'Create Team',
+                icon: <UsersRound style={{ width: 14, height: 14 }} />,
+                onClick: () => setIsCreateTeamModalOpen(true)
+              }
+            : undefined
+        }
       />
 
       {/* Departments Grid */}
@@ -238,20 +243,21 @@ export default function DepartmentsPage() {
                     <MessageSquare style={{ width: 13, height: 13 }} />
                     <span>Channel</span>
                   </Link>
-                  <button
-                    type="button"
-                    onClick={() => setIsCreateTeamModalOpen(true)}
-                    className="btn btn-outline btn-sm"
-                  >
-                    <Plus style={{ width: 13, height: 13 }} />
-                    <span>Add Team</span>
-                  </button>
-                  {isOwnerOrAdmin && (
+                  {canCreateTeam && (
                     <button
                       type="button"
-                      onClick={() => handleDeleteDepartment(dept.id, dept.name)}
-                      disabled={deletingDeptId === dept.id}
-                      title="Delete Department (Admin Only)"
+                      onClick={() => setIsCreateTeamModalOpen(true)}
+                      className="btn btn-outline btn-sm"
+                    >
+                      <Plus style={{ width: 13, height: 13 }} />
+                      <span>Add Team</span>
+                    </button>
+                  )}
+                  {isSuperOwner && (
+                    <button
+                      type="button"
+                      onClick={() => openDeleteDeptModal(dept)}
+                      title="Delete Department (Super Owner Only)"
                       style={{
                         padding: '6px 10px',
                         borderRadius: '8px',
@@ -263,12 +269,12 @@ export default function DepartmentsPage() {
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '5px',
-                        cursor: deletingDeptId === dept.id ? 'not-allowed' : 'pointer',
+                        cursor: 'pointer',
                         transition: 'all 150ms ease'
                       }}
                     >
                       <Trash2 style={{ width: 12, height: 12 }} />
-                      <span>{deletingDeptId === dept.id ? 'Deleting...' : 'Delete'}</span>
+                      <span>Delete</span>
                     </button>
                   )}
                 </div>

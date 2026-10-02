@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase';
-import { Organization, OrganizationMembership, Department, Team, Task, Board, Channel, User, UserRole, Invitation } from './types';
+import { Organization, OrganizationMembership, Department, Team, Task, Board, Channel, Message, User, UserRole, Invitation } from './types';
 
 export interface WorkspaceData {
   user?: User;
@@ -11,6 +11,7 @@ export interface WorkspaceData {
   tasks: Task[];
   boards: Board[];
   channels: Channel[];
+  messages?: Message[];
   invitations?: Invitation[];
 }
 
@@ -281,6 +282,18 @@ export async function syncUserAndFetchWorkspace(
       .select('*')
       .in('organization_id', orgIds);
 
+    // 8b. Fetch Messages for these channels
+    const channelIds = (channelsData || []).map((c: any) => c.id);
+    let messagesData: any[] = [];
+    if (channelIds.length > 0) {
+      const { data: msgs } = await supabase
+        .from('messages')
+        .select('id, channel_id, sender_id, content, reply_to_id, attachments, created_at, users(id, full_name, email, avatar_url)')
+        .in('channel_id', channelIds)
+        .order('created_at', { ascending: true });
+      messagesData = msgs || [];
+    }
+
     // 9. Fetch Invitations
     const { data: invsData } = await supabase
       .from('invitations')
@@ -333,6 +346,21 @@ export async function syncUserAndFetchWorkspace(
         columns: (b.board_columns || []).sort((c1: any, c2: any) => (c1.position || 0) - (c2.position || 0))
       })),
       channels: channelsData || [],
+      messages: (messagesData || []).map((m: any) => ({
+        id: m.id,
+        channel_id: m.channel_id,
+        sender_id: m.sender_id,
+        content: m.content,
+        reply_to_id: m.reply_to_id,
+        attachments: m.attachments,
+        created_at: m.created_at,
+        sender: m.users ? {
+          id: m.users.id,
+          email: m.users.email,
+          full_name: m.users.full_name,
+          avatar_url: m.users.avatar_url
+        } : undefined
+      })),
       invitations: (invsData || []).map((i: any) => ({
         id: i.id,
         organization_id: i.organization_id,
@@ -974,3 +1002,181 @@ export async function acceptInvitationInSupabase(
     return null;
   }
 }
+
+export async function fetchMessagesFromSupabase(channelId?: string): Promise<Message[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+  try {
+    let query = supabase
+      .from('messages')
+      .select('id, channel_id, sender_id, content, reply_to_id, attachments, created_at, users(id, full_name, email, avatar_url)')
+      .order('created_at', { ascending: true });
+
+    if (channelId) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (isUuid.test(channelId)) {
+        query = query.eq('channel_id', channelId);
+      }
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.warn('fetchMessagesFromSupabase error:', error);
+      return [];
+    }
+
+    return (data || []).map((m: any) => {
+      const u: any = Array.isArray(m.users) ? m.users[0] : m.users;
+      return {
+        id: m.id,
+        channel_id: m.channel_id,
+        sender_id: m.sender_id,
+        content: m.content,
+        reply_to_id: m.reply_to_id,
+        attachments: m.attachments,
+        created_at: m.created_at,
+        sender: u ? {
+          id: u.id,
+          email: u.email,
+          full_name: u.full_name,
+          avatar_url: u.avatar_url
+        } : undefined
+      };
+    });
+  } catch (err) {
+    console.warn('fetchMessagesFromSupabase exception:', err);
+    return [];
+  }
+}
+
+export async function sendMessageInSupabase(
+  channelId: string,
+  senderId: string,
+  content: string,
+  replyToId?: string,
+  senderEmail?: string,
+  channelName?: string
+): Promise<Message | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  try {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let validSenderId = senderId;
+    if (!isUuid.test(validSenderId)) {
+      const { data: u } = await supabase
+        .from('users')
+        .select('id')
+        .or(`clerk_id.eq.${senderId},email.eq.${(senderEmail || '').toLowerCase()}`)
+        .limit(1)
+        .maybeSingle();
+      if (u?.id) validSenderId = u.id;
+    }
+
+    let validChannelId = channelId;
+    if (!isUuid.test(validChannelId)) {
+      if (channelName) {
+        const { data: namedCh } = await supabase
+          .from('channels')
+          .select('id')
+          .eq('name', channelName.toLowerCase().trim())
+          .limit(1)
+          .maybeSingle();
+        if (namedCh?.id) validChannelId = namedCh.id;
+      }
+      if (!isUuid.test(validChannelId)) {
+        const { data: ch } = await supabase
+          .from('channels')
+          .select('id')
+          .eq('name', 'general')
+          .limit(1)
+          .maybeSingle();
+        if (ch?.id) validChannelId = ch.id;
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        channel_id: validChannelId,
+        sender_id: validSenderId,
+        content,
+        reply_to_id: replyToId && isUuid.test(replyToId) ? replyToId : null
+      })
+      .select('id, channel_id, sender_id, content, reply_to_id, attachments, created_at, users(id, full_name, email, avatar_url)')
+      .single();
+
+    if (error) {
+      console.warn('sendMessageInSupabase error:', error);
+      return null;
+    }
+
+    const msgData: any = data;
+    const senderUser: any = Array.isArray(msgData?.users) ? msgData.users[0] : msgData?.users;
+
+    return {
+      id: msgData.id,
+      channel_id: msgData.channel_id,
+      sender_id: msgData.sender_id,
+      content: msgData.content,
+      reply_to_id: msgData.reply_to_id,
+      attachments: msgData.attachments,
+      created_at: msgData.created_at,
+      sender: senderUser ? {
+        id: senderUser.id,
+        email: senderUser.email,
+        full_name: senderUser.full_name,
+        avatar_url: senderUser.avatar_url
+      } : undefined
+    };
+  } catch (err) {
+    console.warn('sendMessageInSupabase exception:', err);
+    return null;
+  }
+}
+
+export async function createChannelInSupabase(channel: {
+  orgId: string;
+  name: string;
+  type?: Channel['type'];
+  description?: string;
+  deptId?: string;
+  teamId?: string;
+  createdBy?: string;
+}): Promise<Channel | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  try {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const { data, error } = await supabase
+      .from('channels')
+      .insert({
+        organization_id: channel.orgId,
+        name: channel.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+        type: channel.type || 'PUBLIC',
+        description: channel.description || null,
+        department_id: channel.deptId && isUuid.test(channel.deptId) ? channel.deptId : null,
+        team_id: channel.teamId && isUuid.test(channel.teamId) ? channel.teamId : null,
+        created_by: channel.createdBy && isUuid.test(channel.createdBy) ? channel.createdBy : null
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.warn('createChannelInSupabase error:', error);
+      return null;
+    }
+
+    return {
+      id: data.id,
+      organization_id: data.organization_id,
+      department_id: data.department_id,
+      team_id: data.team_id,
+      name: data.name,
+      type: data.type,
+      description: data.description,
+      created_by: data.created_by,
+      created_at: data.created_at
+    };
+  } catch (err) {
+    console.warn('createChannelInSupabase exception:', err);
+    return null;
+  }
+}
+

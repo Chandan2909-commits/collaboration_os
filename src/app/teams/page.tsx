@@ -10,7 +10,8 @@ import {
   MessageSquare,
   ShieldCheck,
   ArrowRight,
-  Trash2
+  Trash2,
+  ShieldAlert
 } from 'lucide-react';
 import { useApp } from '@/lib/AppContext';
 import { SignatureHero } from '@/components/layout/SignatureHero';
@@ -18,39 +19,35 @@ import { SignatureHero } from '@/components/layout/SignatureHero';
 export default function TeamsPage() {
   const {
     teams,
-    deleteTeam,
     departments,
     users,
     tasks,
-    currentUser,
-    currentUserMembership,
     setIsCreateTeamModalOpen,
-    setIsInviteModalOpen
+    setIsInviteModalOpen,
+    openDeleteTeamModal,
+    canCreateTeam,
+    canDeleteTeam,
+    isOwnerOrAdmin
   } = useApp();
 
-  const isOwnerOrAdmin =
-    currentUser.role === 'ORGANIZATION_OWNER' ||
-    currentUser.role === 'ORGANIZATION_ADMIN' ||
-    currentUserMembership?.role === 'ORGANIZATION_OWNER' ||
-    currentUserMembership?.role === 'ORGANIZATION_ADMIN';
-
-  const [deletingTeamId, setDeletingTeamId] = useState<string | null>(null);
-
-  const handleDeleteTeam = async (teamId: string, teamName: string) => {
-    if (!window.confirm(`Are you sure you want to delete the "${teamName}" team?`)) {
-      return;
-    }
-    setDeletingTeamId(teamId);
-    try {
-      await deleteTeam(teamId);
-    } catch (err) {
-      console.error('Failed to delete team:', err);
-    } finally {
-      setDeletingTeamId(null);
-    }
-  };
-
   const [selectedDeptId, setSelectedDeptId] = useState<string>('ALL');
+
+  if (!isOwnerOrAdmin) {
+    return (
+      <div className="animate-page-enter" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', textAlign: 'center', padding: '24px' }}>
+        <div style={{ width: 56, height: 56, borderRadius: '16px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', color: '#dc2626' }}>
+          <ShieldAlert style={{ width: 28, height: 28 }} />
+        </div>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#111827', marginBottom: '8px' }}>Access Restricted</h2>
+        <p style={{ fontSize: '0.9375rem', color: '#64748b', maxWidth: '440px', lineHeight: 1.6, marginBottom: '24px' }}>
+          Only the Super Owner and Organization Admins have permission to view and manage organizational teams.
+        </p>
+        <Link href="/" className="btn btn-primary" style={{ padding: '8px 20px', borderRadius: '9999px' }}>
+          Return to Overview
+        </Link>
+      </div>
+    );
+  }
 
   const filteredTeams =
     selectedDeptId === 'ALL'
@@ -64,16 +61,24 @@ export default function TeamsPage() {
         tag="Cross-Functional Units"
         title="Teams & Specializations"
         description="Autonomous pods executing sprints, managing focused Kanban boards, and maintaining domain-specific discussions. Nested strictly under parent departments."
-        primaryAction={{
-          label: 'Create Team',
-          icon: <Plus style={{ width: 14, height: 14 }} />,
-          onClick: () => setIsCreateTeamModalOpen(true)
-        }}
-        secondaryAction={{
-          label: 'Invite Member',
-          icon: <UsersRound style={{ width: 14, height: 14 }} />,
-          onClick: () => setIsInviteModalOpen(true)
-        }}
+        primaryAction={
+          canCreateTeam
+            ? {
+                label: 'Create Team',
+                icon: <Plus style={{ width: 14, height: 14 }} />,
+                onClick: () => setIsCreateTeamModalOpen(true)
+              }
+            : undefined
+        }
+        secondaryAction={
+          isOwnerOrAdmin
+            ? {
+                label: 'Invite Member',
+                icon: <UsersRound style={{ width: 14, height: 14 }} />,
+                onClick: () => setIsInviteModalOpen(true)
+              }
+            : undefined
+        }
       />
 
       {/* Department Filter Pills */}
@@ -254,12 +259,11 @@ export default function TeamsPage() {
                     <MessageSquare style={{ width: 13, height: 13 }} />
                     <span>Team Chat</span>
                   </Link>
-                  {isOwnerOrAdmin && (
+                  {canDeleteTeam && (
                     <button
                       type="button"
-                      onClick={() => handleDeleteTeam(team.id, team.name)}
-                      disabled={deletingTeamId === team.id}
-                      title="Delete Team (Admin Only)"
+                      onClick={() => openDeleteTeamModal(team)}
+                      title="Delete Team (Super Owner & Admin)"
                       style={{
                         padding: '6px 10px',
                         borderRadius: '8px',
@@ -271,12 +275,12 @@ export default function TeamsPage() {
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '5px',
-                        cursor: deletingTeamId === team.id ? 'not-allowed' : 'pointer',
+                        cursor: 'pointer',
                         transition: 'all 150ms ease'
                       }}
                     >
                       <Trash2 style={{ width: 12, height: 12 }} />
-                      <span>{deletingTeamId === team.id ? 'Deleting...' : 'Delete'}</span>
+                      <span>Delete</span>
                     </button>
                   )}
                 </div>

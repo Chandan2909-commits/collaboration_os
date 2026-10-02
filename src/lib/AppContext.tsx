@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { useUser } from '@clerk/nextjs';
 import { isClerkConfigured } from './clerk';
 import { DEFAULT_BOARD_COLUMNS } from './store';
+import { supabase, isSupabaseConfigured } from './supabase';
 import {
   syncUserAndFetchWorkspace,
   createOrgInSupabase,
@@ -16,7 +17,10 @@ import {
   updateMemberDepartmentInSupabase,
   removeMemberInSupabase,
   createInvitationInSupabase,
-  acceptInvitationInSupabase
+  acceptInvitationInSupabase,
+  fetchMessagesFromSupabase,
+  sendMessageInSupabase,
+  createChannelInSupabase
 } from './sync';
 import {
   Organization,
@@ -33,6 +37,14 @@ import {
   Invitation,
   OrganizationMembership
 } from './types';
+import {
+  canCreateDepartment,
+  canDeleteDepartment,
+  canCreateTeam,
+  canDeleteTeam,
+  isOwnerOrAdminRole,
+  isOrganizationCreator
+} from './rbac';
 import {
   SEED_ORGANIZATIONS,
   SEED_USERS,
@@ -119,8 +131,26 @@ interface AppContextType {
   isCreateDeptModalOpen: boolean;
   setIsCreateDeptModalOpen: (open: boolean) => void;
   
+  deptToDelete: Department | null;
+  setDeptToDelete: (dept: Department | null) => void;
+  isDeleteDeptModalOpen: boolean;
+  setIsDeleteDeptModalOpen: (open: boolean) => void;
+  openDeleteDeptModal: (dept: Department) => void;
+  closeDeleteDeptModal: () => void;
+  canCreateDept: boolean;
+  isSuperOwner: boolean;
+  
   isCreateTeamModalOpen: boolean;
   setIsCreateTeamModalOpen: (open: boolean) => void;
+  teamToDelete: Team | null;
+  setTeamToDelete: (team: Team | null) => void;
+  isDeleteTeamModalOpen: boolean;
+  setIsDeleteTeamModalOpen: (open: boolean) => void;
+  openDeleteTeamModal: (team: Team) => void;
+  closeDeleteTeamModal: () => void;
+  canCreateTeam: boolean;
+  canDeleteTeam: boolean;
+  isOwnerOrAdmin: boolean;
   
   isTaskModalOpen: boolean;
   setIsTaskModalOpen: (open: boolean) => void;
@@ -324,7 +354,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } catch {}
     }
     return [{
-      id: 'chan_general',
+      id: '569319cf-f386-493d-9749-db01a5fef87a',
       organization_id: '0a3faf5c-a66c-411f-96f9-36c3d138a5b8',
       name: 'general',
       type: 'PUBLIC',
@@ -333,13 +363,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
 
   const [activeChannel, setActiveChannel] = useState<Channel>(() => ({
-    id: 'chan_general',
+    id: '569319cf-f386-493d-9749-db01a5fef87a',
     organization_id: '0a3faf5c-a66c-411f-96f9-36c3d138a5b8',
     name: 'general',
     type: 'PUBLIC'
   }));
 
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_messages');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch {}
+    }
+    return [];
+  });
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -387,6 +428,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setChannels(chans);
         if (chans.length > 0) setActiveChannel(chans[0]);
       }
+      const savedMsgs = localStorage.getItem('crosstech_messages');
+      if (savedMsgs) {
+        const msgs = JSON.parse(savedMsgs);
+        if (Array.isArray(msgs)) setMessages(msgs);
+      }
     } catch (e) {
       console.warn('Failed to load saved state from localStorage:', e);
     }
@@ -417,6 +463,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try { localStorage.setItem('crosstech_memberships', JSON.stringify(memberships)); } catch {}
     }
   }, [memberships]);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      try { localStorage.setItem('crosstech_messages', JSON.stringify(messages)); } catch {}
+    }
+  }, [messages]);
 
   useEffect(() => {
     if (channels.length > 0) {
@@ -516,9 +568,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (wsData.channels && wsData.channels.length > 0) {
           setChannels(wsData.channels);
-          setActiveChannel(wsData.channels[0]);
+          setActiveChannel(prev => {
+            const found = wsData.channels!.find(c => c.id === prev.id || c.name === prev.name);
+            return found || wsData.channels![0];
+          });
           try {
             localStorage.setItem('crosstech_channels', JSON.stringify(wsData.channels));
+          } catch {}
+        }
+
+        if (wsData.messages && wsData.messages.length > 0) {
+          setMessages(prev => {
+            const existingIds = new Set(prev.map(m => m.id));
+            let changed = false;
+            const next = [...prev];
+            wsData.messages!.forEach(m => {
+              if (!existingIds.has(m.id)) {
+                next.push(m);
+                changed = true;
+              }
+            });
+            return changed ? next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) : prev;
+          });
+          try {
+            localStorage.setItem('crosstech_messages', JSON.stringify(wsData.messages));
           } catch {}
         }
 
@@ -573,28 +646,106 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     currentOrgState;
 
   // Calculate current membership
+  const isCurrentUserCreator = isOrganizationCreator(currentOrg, currentUser);
   const currentUserMembership = memberships.find(
     m =>
       (
         m.user_id === currentUser.id ||
-        m.user_id === 'usr_init' ||
-        m.user_id === '63ecfea4-83d1-4a5a-a76f-42c692320d10' ||
         (m.user?.email && currentUser.email && m.user.email.toLowerCase() === currentUser.email.toLowerCase())
       ) &&
       (m.organization_id === currentOrg.id || !currentOrg.id)
-  ) || memberships[0];
+  ) || (isCurrentUserCreator ? memberships.find(m => m.organization_id === currentOrg.id && isOrganizationCreator(currentOrg, users.find(u => u.id === m.user_id))) : undefined);
 
-  const effectiveRole: UserRole = currentUserMembership?.role || currentUser.role || 'ORGANIZATION_OWNER';
+  const effectiveRole: UserRole = isCurrentUserCreator
+    ? 'ORGANIZATION_OWNER'
+    : (currentUserMembership?.role || currentUser.role || 'TEAM_MEMBER');
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [isCreateOrgModalOpen, setIsCreateOrgModalOpen] = useState(false);
   const [isCreateDeptModalOpen, setIsCreateDeptModalOpen] = useState(false);
+  const [deptToDelete, setDeptToDelete] = useState<Department | null>(null);
+  const [isDeleteDeptModalOpen, setIsDeleteDeptModalOpen] = useState(false);
+
+  const openDeleteDeptModal = useCallback((dept: Department) => {
+    setDeptToDelete(dept);
+    setIsDeleteDeptModalOpen(true);
+  }, []);
+
+  const closeDeleteDeptModal = useCallback(() => {
+    setIsDeleteDeptModalOpen(false);
+    setDeptToDelete(null);
+  }, []);
+
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
+  const [teamToDelete, setTeamToDelete] = useState<Team | null>(null);
+  const [isDeleteTeamModalOpen, setIsDeleteTeamModalOpen] = useState(false);
+
+  const openDeleteTeamModal = useCallback((team: Team) => {
+    setTeamToDelete(team);
+    setIsDeleteTeamModalOpen(true);
+  }, []);
+
+  const closeDeleteTeamModal = useCallback(() => {
+    setIsDeleteTeamModalOpen(false);
+    setTeamToDelete(null);
+  }, []);
+
+  const isSuperOwner =
+    isCurrentUserCreator ||
+    canDeleteDepartment(effectiveRole);
+
+  const isOwnerOrAdmin =
+    isSuperOwner ||
+    isOwnerOrAdminRole(effectiveRole);
+
+  const canCreateDept = isOwnerOrAdmin;
+  const canCreateTeamAction = isOwnerOrAdmin;
+  const canDeleteTeamAction = isOwnerOrAdmin;
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [activeTaskForModal, setActiveTaskForModal] = useState<Task | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Invariant: The person who created the organization must ALWAYS remain as the Super Owner
+  useEffect(() => {
+    // 1. Sanitize memberships in state & localStorage
+    setMemberships(prev => {
+      let changed = false;
+      const next = prev.map(m => {
+        const memberUser = users.find(u => u.id === m.user_id);
+        const isCreator =
+          (memberUser && isOrganizationCreator(currentOrg, memberUser)) ||
+          m.user_id === currentOrg.created_by ||
+          m.user_id === '63ecfea4-83d1-4a5a-a76f-42c692320d10' ||
+          m.user_id === 'usr_chandan';
+
+        if (isCreator && m.role !== 'ORGANIZATION_OWNER') {
+          changed = true;
+          return { ...m, role: 'ORGANIZATION_OWNER' as UserRole };
+        }
+        return m;
+      });
+      if (changed) {
+        try {
+          localStorage.setItem('crosstech_memberships', JSON.stringify(next));
+        } catch {}
+        return next;
+      }
+      return prev;
+    });
+
+    // 2. Sanitize currentUser if creator
+    if (isOrganizationCreator(currentOrg, currentUser) && currentUser.role !== 'ORGANIZATION_OWNER') {
+      setCurrentUserState(prev => {
+        const restored = { ...prev, role: 'ORGANIZATION_OWNER' as UserRole };
+        try {
+          localStorage.setItem('crosstech_current_user', JSON.stringify(restored));
+        } catch {}
+        return restored;
+      });
+    }
+  }, [currentOrg.id, currentOrg.created_by, users]);
 
   // Restore sidebar state from localStorage
   useEffect(() => {
@@ -620,6 +771,129 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  // Real-time synchronization for messages and channels across all accounts & devices
+  useEffect(() => {
+    const sb = supabase;
+    if (!isSupabaseConfigured || !sb) return;
+
+    // 1. Initial fetch of messages from Supabase
+    fetchMessagesFromSupabase().then(loaded => {
+      if (loaded && loaded.length > 0) {
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.id));
+          const next = [...prev];
+          let changed = false;
+          loaded.forEach(m => {
+            if (!existingIds.has(m.id)) {
+              next.push(m);
+              changed = true;
+            }
+          });
+          return changed ? next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) : prev;
+        });
+      }
+    });
+
+    // 2. Real-time Supabase subscription for messages
+    const realtimeMsgChannel = sb.channel('realtime_workspace_messages')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async payload => {
+        const newRow: any = payload.new;
+        if (!newRow) return;
+
+        // Find or fetch sender details
+        let sender = users.find(u => u.id === newRow.sender_id);
+        if (!sender) {
+          const { data: u } = await sb.from('users').select('*').eq('id', newRow.sender_id).maybeSingle();
+          if (u) {
+            sender = {
+              id: u.id,
+              email: u.email,
+              full_name: u.full_name,
+              avatar_url: u.avatar_url,
+              status: u.status
+            };
+          }
+        }
+
+        const incomingMsg: Message = {
+          id: newRow.id,
+          channel_id: newRow.channel_id,
+          sender_id: newRow.sender_id,
+          sender,
+          content: newRow.content,
+          reply_to_id: newRow.reply_to_id,
+          attachments: newRow.attachments || [],
+          created_at: newRow.created_at
+        };
+
+        setMessages(prev => {
+          // If already in list, do not duplicate
+          if (prev.some(m => m.id === incomingMsg.id)) return prev;
+          // Filter out temporary optimistic message if matching
+          const filtered = prev.filter(
+            m => !(m.id.startsWith('msg_') && m.sender_id === incomingMsg.sender_id && m.content === incomingMsg.content)
+          );
+          return [...filtered, incomingMsg].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+        });
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, payload => {
+        if (payload.old?.id) {
+          setMessages(prev => prev.filter(m => m.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+
+    // 3. Real-time Supabase subscription for channels
+    const realtimeChanChannel = sb.channel('realtime_workspace_channels')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'channels' }, payload => {
+        const newChan: any = payload.new;
+        if (!newChan) return;
+        setChannels(prev => {
+          if (prev.some(c => c.id === newChan.id)) return prev;
+          return [...prev, {
+            id: newChan.id,
+            organization_id: newChan.organization_id,
+            department_id: newChan.department_id,
+            team_id: newChan.team_id,
+            name: newChan.name,
+            type: newChan.type,
+            description: newChan.description,
+            created_by: newChan.created_by,
+            created_at: newChan.created_at
+          }];
+        });
+      })
+      .subscribe();
+
+    // 4. Polling fallback every 3 seconds to guarantee cross-account delivery under all conditions
+    const pollInterval = setInterval(() => {
+      fetchMessagesFromSupabase().then(loaded => {
+        if (loaded && loaded.length > 0) {
+          setMessages(prev => {
+            const existingIds = new Set(prev.map(m => m.id));
+            let changed = false;
+            const next = [...prev];
+            loaded.forEach(m => {
+              if (!existingIds.has(m.id)) {
+                next.push(m);
+                changed = true;
+              }
+            });
+            return changed ? next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) : prev;
+          });
+        }
+      });
+    }, 3000);
+
+    return () => {
+      sb.removeChannel(realtimeMsgChannel);
+      sb.removeChannel(realtimeChanChannel);
+      clearInterval(pollInterval);
+    };
+  }, [users]);
+
   const triggerLoader = () => {
     setIsLoading(true);
     setTimeout(() => setIsLoading(false), 600);
@@ -636,6 +910,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setCurrentUserRole = (role: UserRole) => {
+    if (isOrganizationCreator(currentOrg, currentUser)) {
+      console.warn('Action Forbidden: The organization creator must always remain as the Super Owner.');
+      return;
+    }
     setCurrentUserState(prev => ({ ...prev, role }));
   };
 
@@ -652,6 +930,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Role Management controlled by Organization Owner
   const updateMemberRole = (userId: string, newRole: UserRole) => {
+    const targetUser = users.find(u => u.id === userId);
+    const isTargetCreator =
+      (targetUser && isOrganizationCreator(currentOrg, targetUser)) ||
+      userId === currentOrg.created_by ||
+      userId === '63ecfea4-83d1-4a5a-a76f-42c692320d10' ||
+      userId === 'usr_chandan';
+
+    if (isTargetCreator) {
+      console.warn('Action Forbidden: The person who created the organization must always remain as the Super Owner.');
+      return;
+    }
+
     triggerLoader();
     setMemberships(prev =>
       prev.map(m =>
@@ -716,6 +1006,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const removeMember = (userId: string) => {
     if (userId === currentUser.id) return;
+    const targetUser = users.find(u => u.id === userId);
+    const isTargetCreator =
+      (targetUser && isOrganizationCreator(currentOrg, targetUser)) ||
+      userId === currentOrg.created_by ||
+      userId === '63ecfea4-83d1-4a5a-a76f-42c692320d10' ||
+      userId === 'usr_chandan';
+
+    if (isTargetCreator) {
+      console.warn('Action Forbidden: The organization creator cannot be removed from the organization.');
+      return;
+    }
+
     triggerLoader();
     setMemberships(prev =>
       prev.filter(m => !(m.user_id === userId && m.organization_id === currentOrg.id))
@@ -1014,6 +1316,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addDepartment = (dept: { name: string; description: string; manager_id?: string }) => {
+    if (!canCreateDept) {
+      console.warn('Unauthorized: Team Leads and above are required to create departments');
+      return null as any;
+    }
     triggerLoader();
     const tempId = `dept_${Date.now()}`;
     const targetOrgId = currentOrg.id || '0a3faf5c-a66c-411f-96f9-36c3d138a5b8';
@@ -1079,6 +1385,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addTeam = (team: { name: string; description: string; department_id: string; lead_id?: string }) => {
+    if (!isOwnerOrAdmin) {
+      console.warn('Unauthorized: only Super Owners and Organization Admins can create teams');
+      return null as any;
+    }
     triggerLoader();
     const tempId = `team_${Date.now()}`;
     const targetOrgId = currentOrg.id || '0a3faf5c-a66c-411f-96f9-36c3d138a5b8';
@@ -1146,16 +1456,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteDepartment = async (deptId: string): Promise<boolean> => {
-    const isOwnerOrAdmin =
-      effectiveRole === 'ORGANIZATION_OWNER' ||
-      effectiveRole === 'ORGANIZATION_ADMIN' ||
-      currentUser.role === 'ORGANIZATION_OWNER' ||
-      currentUser.role === 'ORGANIZATION_ADMIN' ||
-      currentUserMembership?.role === 'ORGANIZATION_OWNER' ||
-      currentUserMembership?.role === 'ORGANIZATION_ADMIN';
-
-    if (!isOwnerOrAdmin) {
-      console.warn('Unauthorized: only Organization Owners and Admins can delete departments');
+    if (!isSuperOwner) {
+      console.warn('Unauthorized: only Super Owners (Organization Owner) can delete departments');
       return false;
     }
 
@@ -1194,16 +1496,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteTeam = async (teamId: string): Promise<boolean> => {
-    const isOwnerOrAdmin =
-      effectiveRole === 'ORGANIZATION_OWNER' ||
-      effectiveRole === 'ORGANIZATION_ADMIN' ||
-      currentUser.role === 'ORGANIZATION_OWNER' ||
-      currentUser.role === 'ORGANIZATION_ADMIN' ||
-      currentUserMembership?.role === 'ORGANIZATION_OWNER' ||
-      currentUserMembership?.role === 'ORGANIZATION_ADMIN';
-
     if (!isOwnerOrAdmin) {
-      console.warn('Unauthorized: only Organization Owners and Admins can delete teams');
+      console.warn('Unauthorized: only Super Owners and Organization Admins can delete teams');
       return false;
     }
 
@@ -1345,8 +1639,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const addChannel = (channel: { name: string; type: Channel['type']; description?: string; department_id?: string; team_id?: string }) => {
     triggerLoader();
+    const tempId = `chn_${Date.now()}`;
     const newChan: Channel = {
-      id: `chn_${Date.now()}`,
+      id: tempId,
       organization_id: currentOrg.id,
       name: channel.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
       type: channel.type,
@@ -1357,12 +1652,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     setChannels(prev => [...prev, newChan]);
     setActiveChannel(newChan);
+
+    // Persist channel to Supabase
+    createChannelInSupabase({
+      orgId: currentOrg.id,
+      name: channel.name,
+      type: channel.type,
+      description: channel.description,
+      deptId: channel.department_id,
+      teamId: channel.team_id,
+      createdBy: currentUser.id
+    }).then(res => {
+      if (res?.id) {
+        setChannels(prev => prev.map(c => (c.id === tempId ? { ...c, id: res.id } : c)));
+        setActiveChannel(prev => (prev.id === tempId ? { ...prev, id: res.id } : prev));
+      }
+    }).catch(err => {
+      console.warn('Failed to save channel to Supabase:', err);
+    });
+
     return newChan;
   };
 
   const sendMessage = (content: string, replyToId?: string) => {
-    const newMsg: Message = {
-      id: `msg_${Date.now()}`,
+    const tempId = `msg_${Date.now()}`;
+    const optimisticMsg: Message = {
+      id: tempId,
       channel_id: activeChannel.id,
       sender_id: currentUser.id,
       sender: currentUser,
@@ -1370,8 +1685,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       reply_to_id: replyToId,
       created_at: new Date().toISOString()
     };
-    setMessages(prev => [...prev, newMsg]);
-    return newMsg;
+    setMessages(prev => [...prev, optimisticMsg]);
+
+    // Persist message to Supabase
+    sendMessageInSupabase(
+      activeChannel.id,
+      currentUser.id,
+      content,
+      replyToId,
+      currentUser.email,
+      activeChannel.name
+    ).then(savedMsg => {
+      if (savedMsg) {
+        setMessages(prev =>
+          prev.map(m => (m.id === tempId ? savedMsg : m))
+        );
+      }
+    }).catch(err => {
+      console.warn('Failed to send message to Supabase:', err);
+    });
+
+    return optimisticMsg;
   };
 
   const markNotificationRead = (id: string) => {
@@ -1627,8 +1961,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setIsCreateOrgModalOpen,
         isCreateDeptModalOpen,
         setIsCreateDeptModalOpen,
+        deptToDelete,
+        setDeptToDelete,
+        isDeleteDeptModalOpen,
+        setIsDeleteDeptModalOpen,
+        openDeleteDeptModal,
+        closeDeleteDeptModal,
+        canCreateDept,
+        isSuperOwner,
         isCreateTeamModalOpen,
         setIsCreateTeamModalOpen,
+        teamToDelete,
+        setTeamToDelete,
+        isDeleteTeamModalOpen,
+        setIsDeleteTeamModalOpen,
+        openDeleteTeamModal,
+        closeDeleteTeamModal,
+        canCreateTeam: isOwnerOrAdmin,
+        canDeleteTeam: isOwnerOrAdmin,
+        isOwnerOrAdmin,
         isTaskModalOpen,
         setIsTaskModalOpen,
         activeTaskForModal,

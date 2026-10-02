@@ -26,7 +26,10 @@ export function CommandPalette() {
     setIsInviteModalOpen,
     setIsCreateOrgModalOpen,
     setIsCreateDeptModalOpen,
-    setIsCreateTeamModalOpen
+    setIsCreateTeamModalOpen,
+    canCreateDept,
+    canCreateTeam,
+    isOwnerOrAdmin
   } = useApp();
 
   const [query, setQuery] = useState('');
@@ -55,22 +58,20 @@ export function CommandPalette() {
 
   const q = query.toLowerCase();
 
-  const navItems = [
+  const allNavItems = [
     { label: 'Overview Dashboard', path: '/', icon: Kanban, category: 'Navigation' },
     { label: 'Departments & Hierarchy', path: '/departments', icon: Building2, category: 'Navigation' },
     { label: 'Teams & Leads', path: '/teams', icon: UsersRound, category: 'Navigation' },
     { label: 'Kanban Sprint Board', path: '/kanban', icon: Kanban, category: 'Navigation' },
     { label: 'Channels & Direct Messages', path: '/chat', icon: MessageSquare, category: 'Navigation' },
     { label: 'Members & RBAC Directory', path: '/members', icon: UsersRound, category: 'Navigation' }
-  ].filter(i => i.label.toLowerCase().includes(q));
+  ];
 
-  const filteredDepts = departments
-    .filter(d => d.name.toLowerCase().includes(q))
-    .slice(0, 3);
+  const allowedNav = isOwnerOrAdmin
+    ? allNavItems
+    : allNavItems.filter(i => i.path === '/' || i.path === '/chat' || i.path === '/kanban');
 
-  const filteredTeams = teams
-    .filter(t => t.name.toLowerCase().includes(q))
-    .slice(0, 3);
+  const navItems = allowedNav.filter(i => i.label.toLowerCase().includes(q));
 
   const filteredTasks = tasks
     .filter(t => t.title.toLowerCase().includes(q))
@@ -150,59 +151,92 @@ export function CommandPalette() {
 
         {/* Results List */}
         <div style={{ maxHeight: '360px', overflowY: 'auto', padding: '8px' }}>
-          {/* Quick Actions */}
-          <div style={{ padding: '6px 10px', fontSize: '0.6875rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>
-            Quick Actions
-          </div>
-          <div
-            onClick={() => {
-              setIsCommandPaletteOpen(false);
-              setIsInviteModalOpen(true);
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '8px 12px',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '0.84375rem',
-              color: '#111827'
-            }}
-            onMouseOver={e => (e.currentTarget.style.background = '#f8fafc')}
-            onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <UserPlus style={{ width: 15, height: 15, color: '#1d4ed8' }} />
-              <span>Invite New Team Member</span>
-            </div>
-            <ArrowRight style={{ width: 13, height: 13, color: '#94a3b8' }} />
-          </div>
+          {/* Quick Actions (Admin / Owner Only) */}
+          {isOwnerOrAdmin && (
+            <>
+              <div style={{ padding: '6px 10px', fontSize: '0.6875rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>
+                Quick Actions
+              </div>
+              <div
+                onClick={() => {
+                  setIsCommandPaletteOpen(false);
+                  setIsInviteModalOpen(true);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '0.84375rem',
+                  color: '#111827'
+                }}
+                onMouseOver={e => (e.currentTarget.style.background = '#f8fafc')}
+                onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <UserPlus style={{ width: 15, height: 15, color: '#1d4ed8' }} />
+                  <span>Invite New Team Member</span>
+                </div>
+                <ArrowRight style={{ width: 13, height: 13, color: '#94a3b8' }} />
+              </div>
 
-          <div
-            onClick={() => {
-              setIsCommandPaletteOpen(false);
-              setIsCreateDeptModalOpen(true);
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '8px 12px',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '0.84375rem',
-              color: '#111827'
-            }}
-            onMouseOver={e => (e.currentTarget.style.background = '#f8fafc')}
-            onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Plus style={{ width: 15, height: 15, color: '#1d4ed8' }} />
-              <span>Create New Department</span>
-            </div>
-            <ArrowRight style={{ width: 13, height: 13, color: '#94a3b8' }} />
-          </div>
+              {canCreateDept && (
+                <div
+                  onClick={() => {
+                    setIsCommandPaletteOpen(false);
+                    setIsCreateDeptModalOpen(true);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '0.84375rem',
+                    color: '#111827'
+                  }}
+                  onMouseOver={e => (e.currentTarget.style.background = '#f8fafc')}
+                  onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <Plus style={{ width: 15, height: 15, color: '#1d4ed8' }} />
+                    <span>Create New Department</span>
+                  </div>
+                  <ArrowRight style={{ width: 13, height: 13, color: '#94a3b8' }} />
+                </div>
+              )}
+
+              {canCreateTeam && (
+                <div
+                  onClick={() => {
+                    setIsCommandPaletteOpen(false);
+                    setIsCreateTeamModalOpen(true);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '0.84375rem',
+                    color: '#111827'
+                  }}
+                  onMouseOver={e => (e.currentTarget.style.background = '#f8fafc')}
+                  onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <UsersRound style={{ width: 15, height: 15, color: '#1d4ed8' }} />
+                    <span>Create New Team</span>
+                  </div>
+                  <ArrowRight style={{ width: 13, height: 13, color: '#94a3b8' }} />
+                </div>
+              )}
+            </>
+          )}
 
           {/* Navigation */}
           {navItems.length > 0 && (

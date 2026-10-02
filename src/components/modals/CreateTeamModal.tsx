@@ -5,13 +5,13 @@ import { X, UsersRound } from 'lucide-react';
 import { useApp } from '@/lib/AppContext';
 
 export function CreateTeamModal() {
-  const { isCreateTeamModalOpen, setIsCreateTeamModalOpen, addTeam, departments, users } = useApp();
+  const { isCreateTeamModalOpen, setIsCreateTeamModalOpen, addTeam, departments, users, isOwnerOrAdmin } = useApp();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [departmentId, setDepartmentId] = useState(departments[0]?.id || '');
   const [leadId, setLeadId] = useState(users[0]?.id || '');
 
-  if (!isCreateTeamModalOpen) return null;
+  if (!isCreateTeamModalOpen || !isOwnerOrAdmin) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

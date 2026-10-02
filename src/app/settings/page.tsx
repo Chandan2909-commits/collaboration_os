@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import {
   Building,
   Database,
@@ -12,7 +13,8 @@ import {
   Copy,
   ExternalLink,
   ShieldCheck,
-  Server
+  Server,
+  ShieldAlert
 } from 'lucide-react';
 import { useApp } from '@/lib/AppContext';
 import { SignatureHero } from '@/components/layout/SignatureHero';
@@ -20,13 +22,29 @@ import { isSupabaseConfigured } from '@/lib/supabase';
 import { isClerkConfigured } from '@/lib/clerk';
 
 export default function SettingsPage() {
-  const { currentOrg, currentUser, auditLogs } = useApp();
-  const isOwnerOrAdmin = currentUser.role === 'ORGANIZATION_OWNER' || currentUser.role === 'ORGANIZATION_ADMIN';
+  const { currentOrg, currentUser, auditLogs, isOwnerOrAdmin } = useApp();
   const [activeTab, setActiveTab] = useState<'org' | 'db' | 'auth' | 'audit' | 'plan'>('org');
 
   const [orgName, setOrgName] = useState(currentOrg.name);
   const [orgSlug, setOrgSlug] = useState(currentOrg.slug);
   const [isSaved, setIsSaved] = useState(false);
+
+  if (!isOwnerOrAdmin) {
+    return (
+      <div className="animate-page-enter" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', textAlign: 'center', padding: '24px' }}>
+        <div style={{ width: 56, height: 56, borderRadius: '16px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', color: '#dc2626' }}>
+          <ShieldAlert style={{ width: 28, height: 28 }} />
+        </div>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#111827', marginBottom: '8px' }}>Access Restricted</h2>
+        <p style={{ fontSize: '0.9375rem', color: '#64748b', maxWidth: '440px', lineHeight: 1.6, marginBottom: '24px' }}>
+          Only the Super Owner and Organization Admins have permission to access infrastructure settings and audit logs.
+        </p>
+        <Link href="/" className="btn btn-primary" style={{ padding: '8px 20px', borderRadius: '9999px' }}>
+          Return to Overview
+        </Link>
+      </div>
+    );
+  }
 
   const handleSaveOrg = (e: React.FormEvent) => {
     e.preventDefault();

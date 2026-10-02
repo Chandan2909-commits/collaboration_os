@@ -7,7 +7,9 @@ import { Sidebar } from './Sidebar';
 import { CommandPalette } from '../command/CommandPalette';
 import { CreateOrgModal } from '../modals/CreateOrgModal';
 import { CreateDeptModal } from '../modals/CreateDeptModal';
+import { DeleteDeptModal } from '../modals/DeleteDeptModal';
 import { CreateTeamModal } from '../modals/CreateTeamModal';
+import { DeleteTeamModal } from '../modals/DeleteTeamModal';
 import { InviteModal } from '../modals/InviteModal';
 import { TaskModal } from '../modals/TaskModal';
 
@@ -156,7 +158,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <CommandPalette />
       <CreateOrgModal />
       <CreateDeptModal />
+      <DeleteDeptModal />
       <CreateTeamModal />
+      <DeleteTeamModal />
       <InviteModal />
       <TaskModal />
     </div>
