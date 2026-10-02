@@ -714,6 +714,22 @@ export async function createTeamInSupabase(params: {
       } catch (bErr) {
         console.warn('Failed to create board for new team:', bErr);
       }
+
+      // Also create channel for new team
+      try {
+        await supabase
+          .from('channels')
+          .insert({
+            organization_id: validOrgId,
+            department_id: validDeptId,
+            team_id: team.id,
+            name: params.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+            type: 'PUBLIC',
+            description: `Team pod stream for ${params.name}`
+          });
+      } catch (cErr) {
+        console.warn('Failed to create channel for new team:', cErr);
+      }
     }
 
     return team;

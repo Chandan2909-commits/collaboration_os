@@ -1521,6 +1521,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
 
+    // Create channel for team
+    const teamChan: Channel = {
+      id: `chn_${tempId}`,
+      organization_id: targetOrgId,
+      department_id: team.department_id,
+      team_id: tempId,
+      name: team.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      type: 'PUBLIC',
+      description: `Team pod stream for ${team.name}`,
+      unread_count: 0
+    };
+    setChannels(prev => {
+      const next = [...prev, teamChan];
+      try { localStorage.setItem('crosstech_channels', JSON.stringify(next)); } catch {}
+      return next;
+    });
+
     setAuditLogs(prev => [
       {
         id: `aud_${Date.now()}`,
