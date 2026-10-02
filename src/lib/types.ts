@@ -99,6 +99,7 @@ export interface Task {
   id: string;
   organization_id: string;
   department_id?: string;
+  team_id?: string;
   board_id: string;
   column_id: string;
   title: string;

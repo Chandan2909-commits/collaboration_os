@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase';
-import { Organization, OrganizationMembership, Department, Team, Task, Board, Channel, Message, User, UserRole, Invitation } from './types';
+import { Organization, OrganizationMembership, Department, Team, Task, TaskPriority, Board, BoardColumn, Channel, Message, User, UserRole, Invitation } from './types';
 
 export interface WorkspaceData {
   user?: User;
@@ -264,10 +264,10 @@ export async function syncUserAndFetchWorkspace(
       .select('*')
       .in('organization_id', orgIds);
 
-    // 6. Fetch Tasks
+    // 6. Fetch Tasks with Boards and Comments
     const { data: tasksData } = await supabase
       .from('tasks')
-      .select('*')
+      .select('*, boards(*), task_comments(*, users(*))')
       .in('organization_id', orgIds);
 
     // 7. Fetch Boards with columns
@@ -340,7 +340,36 @@ export async function syncUserAndFetchWorkspace(
       }),
       departments: deptsData || [],
       teams: teamsData || [],
-      tasks: tasksData || [],
+      tasks: (tasksData || []).map((t: any) => ({
+        id: t.id,
+        organization_id: t.organization_id,
+        board_id: t.board_id,
+        column_id: t.column_id,
+        department_id: t.boards?.department_id || undefined,
+        team_id: t.boards?.team_id || undefined,
+        title: t.title,
+        description: t.description || '',
+        created_by: t.created_by,
+        assigned_to: t.assigned_to,
+        priority: t.priority || 'MEDIUM',
+        position: t.position || 1000,
+        due_date: t.due_date,
+        created_at: t.created_at,
+        updated_at: t.updated_at,
+        comments: (t.task_comments || []).map((c: any) => ({
+          id: c.id,
+          task_id: c.task_id,
+          user_id: c.user_id,
+          content: c.content,
+          created_at: c.created_at,
+          user: c.users ? {
+            id: c.users.id,
+            email: c.users.email,
+            full_name: c.users.full_name,
+            avatar_url: c.users.avatar_url
+          } : undefined
+        }))
+      })),
       boards: (boardsData || []).map((b: any) => ({
         ...b,
         columns: (b.board_columns || []).sort((c1: any, c2: any) => (c1.position || 0) - (c2.position || 0))
@@ -658,6 +687,35 @@ export async function createTeamInSupabase(params: {
       .single();
 
     if (error) console.warn('Supabase team insert error:', error);
+
+    if (team) {
+      try {
+        const { data: teamBoard } = await supabase
+          .from('boards')
+          .insert({
+            organization_id: validOrgId,
+            department_id: validDeptId,
+            team_id: team.id,
+            name: `${params.name} Sprint Board`,
+            description: `Sprint board for ${params.name}`
+          })
+          .select()
+          .single();
+
+        if (teamBoard) {
+          await supabase.from('board_columns').insert([
+            { board_id: teamBoard.id, name: 'Backlog', position: 0, wip_limit: 15 },
+            { board_id: teamBoard.id, name: 'To Do', position: 1, wip_limit: 8 },
+            { board_id: teamBoard.id, name: 'In Progress', position: 2, wip_limit: 5 },
+            { board_id: teamBoard.id, name: 'Review', position: 3, wip_limit: 4 },
+            { board_id: teamBoard.id, name: 'Done', position: 4, wip_limit: 0 }
+          ]);
+        }
+      } catch (bErr) {
+        console.warn('Failed to create board for new team:', bErr);
+      }
+    }
+
     return team;
   } catch (err) {
     console.warn('Failed to insert team in Supabase:', err);
@@ -1179,4 +1237,369 @@ export async function createChannelInSupabase(channel: {
     return null;
   }
 }
+
+export async function createTaskInSupabase(params: {
+  orgId: string;
+  boardId?: string;
+  columnId?: string;
+  title: string;
+  description?: string;
+  priority?: TaskPriority;
+  assignedTo?: string;
+  dueDate?: string;
+  createdBy?: string;
+  teamId?: string;
+  deptId?: string;
+  position?: number;
+}): Promise<Task | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  try {
+    let validOrgId = params.orgId;
+    if (!isUuid.test(validOrgId)) {
+      const { data: firstOrg } = await supabase.from('organizations').select('id').limit(1).maybeSingle();
+      if (firstOrg) validOrgId = firstOrg.id;
+    }
+
+    // Resolve Board
+    let targetBoardId: string | null = null;
+    let targetBoard: any = null;
+
+    if (params.boardId && isUuid.test(params.boardId)) {
+      const { data: b } = await supabase.from('boards').select('*, board_columns(*)').eq('id', params.boardId).maybeSingle();
+      if (b) {
+        targetBoardId = b.id;
+        targetBoard = b;
+      }
+    }
+
+    // If no board found and teamId is provided, find or create team's board
+    if (!targetBoardId && params.teamId && isUuid.test(params.teamId)) {
+      const { data: tb } = await supabase.from('boards').select('*, board_columns(*)').eq('team_id', params.teamId).maybeSingle();
+      if (tb) {
+        targetBoardId = tb.id;
+        targetBoard = tb;
+      } else {
+        const { data: teamObj } = await supabase.from('teams').select('name, department_id').eq('id', params.teamId).maybeSingle();
+        const { data: newTeamB } = await supabase.from('boards').insert({
+          organization_id: validOrgId,
+          department_id: teamObj?.department_id || params.deptId || null,
+          team_id: params.teamId,
+          name: `${teamObj?.name || 'Team'} Sprint Board`,
+          description: `Sprint board for ${teamObj?.name || 'team'}`
+        }).select().single();
+
+        if (newTeamB) {
+          targetBoardId = newTeamB.id;
+          const { data: cols } = await supabase.from('board_columns').insert([
+            { board_id: newTeamB.id, name: 'Backlog', position: 0, wip_limit: 15 },
+            { board_id: newTeamB.id, name: 'To Do', position: 1, wip_limit: 8 },
+            { board_id: newTeamB.id, name: 'In Progress', position: 2, wip_limit: 5 },
+            { board_id: newTeamB.id, name: 'Review', position: 3, wip_limit: 4 },
+            { board_id: newTeamB.id, name: 'Done', position: 4, wip_limit: 0 }
+          ]).select();
+          targetBoard = { ...newTeamB, board_columns: cols || [] };
+        }
+      }
+    }
+
+    // If no board found and deptId is provided, find department's board
+    if (!targetBoardId && params.deptId && isUuid.test(params.deptId)) {
+      const { data: db } = await supabase.from('boards').select('*, board_columns(*)').eq('department_id', params.deptId).maybeSingle();
+      if (db) {
+        targetBoardId = db.id;
+        targetBoard = db;
+      }
+    }
+
+    // If still no board found, find any board for organization or create one
+    if (!targetBoardId) {
+      const { data: ob } = await supabase.from('boards').select('*, board_columns(*)').eq('organization_id', validOrgId).limit(1).maybeSingle();
+      if (ob) {
+        targetBoardId = ob.id;
+        targetBoard = ob;
+      } else {
+        const { data: createdB } = await supabase.from('boards').insert({
+          organization_id: validOrgId,
+          name: 'Main Kanban Board',
+          description: 'Organization Sprint Board'
+        }).select().single();
+        if (createdB) {
+          targetBoardId = createdB.id;
+          const { data: cols } = await supabase.from('board_columns').insert([
+            { board_id: createdB.id, name: 'Backlog', position: 0, wip_limit: 15 },
+            { board_id: createdB.id, name: 'To Do', position: 1, wip_limit: 8 },
+            { board_id: createdB.id, name: 'In Progress', position: 2, wip_limit: 5 },
+            { board_id: createdB.id, name: 'Review', position: 3, wip_limit: 4 },
+            { board_id: createdB.id, name: 'Done', position: 4, wip_limit: 0 }
+          ]).select();
+          targetBoard = { ...createdB, board_columns: cols || [] };
+        }
+      }
+    }
+
+    if (!targetBoardId) return null;
+
+    // Resolve column
+    let targetColId: string | null = null;
+    const boardCols = targetBoard?.board_columns || [];
+
+    if (params.columnId && isUuid.test(params.columnId)) {
+      targetColId = params.columnId;
+    } else if (params.columnId && boardCols.length > 0) {
+      const slug = params.columnId.toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '_');
+      const matched = boardCols.find((c: any) =>
+        c.id === params.columnId ||
+        c.name.toLowerCase().replace(/[^a-z0-9]/g, '_') === slug
+      );
+      if (matched) targetColId = matched.id;
+    }
+
+    if (!targetColId && boardCols.length > 0) {
+      targetColId = boardCols[0].id;
+    }
+
+    // Resolve assigned_to
+    let validAssignedTo: string | null = null;
+    if (params.assignedTo && isUuid.test(params.assignedTo)) {
+      validAssignedTo = params.assignedTo;
+    } else if (params.assignedTo) {
+      const { data: u } = await supabase.from('users').select('id').or(`clerk_id.eq.${params.assignedTo},email.eq.${params.assignedTo}`).maybeSingle();
+      if (u) validAssignedTo = u.id;
+    }
+
+    // Resolve created_by
+    let validCreatedBy: string | null = null;
+    if (params.createdBy && isUuid.test(params.createdBy)) {
+      validCreatedBy = params.createdBy;
+    } else if (params.createdBy) {
+      const { data: cu } = await supabase.from('users').select('id').or(`clerk_id.eq.${params.createdBy},email.eq.${params.createdBy}`).maybeSingle();
+      if (cu) validCreatedBy = cu.id;
+    }
+
+    const { data: task, error } = await supabase
+      .from('tasks')
+      .insert({
+        organization_id: validOrgId,
+        board_id: targetBoardId,
+        column_id: targetColId,
+        title: params.title,
+        description: params.description || null,
+        priority: params.priority || 'MEDIUM',
+        position: params.position || 1000,
+        due_date: params.dueDate || null,
+        assigned_to: validAssignedTo,
+        created_by: validCreatedBy
+      })
+      .select('*, boards(*)')
+      .single();
+
+    if (error) {
+      console.warn('createTaskInSupabase error:', error);
+      return null;
+    }
+
+    return {
+      id: task.id,
+      organization_id: task.organization_id,
+      board_id: task.board_id,
+      column_id: task.column_id,
+      department_id: task.boards?.department_id || params.deptId,
+      team_id: task.boards?.team_id || params.teamId,
+      title: task.title,
+      description: task.description || '',
+      created_by: task.created_by,
+      assigned_to: task.assigned_to,
+      priority: task.priority,
+      position: task.position,
+      due_date: task.due_date,
+      created_at: task.created_at,
+      updated_at: task.updated_at,
+      comments: []
+    };
+  } catch (err) {
+    console.warn('createTaskInSupabase exception:', err);
+    return null;
+  }
+}
+
+export async function updateTaskInSupabase(
+  taskId: string,
+  updates: Partial<Task>
+): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase) return false;
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!isUuid.test(taskId)) return false;
+
+  try {
+    const payload: any = { updated_at: new Date().toISOString() };
+    if (updates.title !== undefined) payload.title = updates.title;
+    if (updates.description !== undefined) payload.description = updates.description;
+    if (updates.priority !== undefined) payload.priority = updates.priority;
+    if (updates.due_date !== undefined) payload.due_date = updates.due_date || null;
+    if (updates.position !== undefined) payload.position = updates.position;
+
+    if (updates.assigned_to !== undefined) {
+      if (updates.assigned_to && isUuid.test(updates.assigned_to)) {
+        payload.assigned_to = updates.assigned_to;
+      } else if (!updates.assigned_to) {
+        payload.assigned_to = null;
+      }
+    }
+
+    if (updates.column_id !== undefined && isUuid.test(updates.column_id)) {
+      payload.column_id = updates.column_id;
+    }
+
+    const { error } = await supabase
+      .from('tasks')
+      .update(payload)
+      .eq('id', taskId);
+
+    if (error) {
+      console.warn('updateTaskInSupabase error:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('updateTaskInSupabase exception:', err);
+    return false;
+  }
+}
+
+export async function moveTaskInSupabase(
+  taskId: string,
+  targetColId: string
+): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase) return false;
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!isUuid.test(taskId)) return false;
+
+  try {
+    let resolvedColId = targetColId;
+    if (!isUuid.test(targetColId)) {
+      const { data: t } = await supabase.from('tasks').select('board_id').eq('id', taskId).maybeSingle();
+      if (t?.board_id) {
+        const { data: cols } = await supabase.from('board_columns').select('*').eq('board_id', t.board_id);
+        const slug = targetColId.toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '_');
+        const matched = (cols || []).find((c: any) =>
+          c.name.toLowerCase().replace(/[^a-z0-9]/g, '_') === slug
+        );
+        if (matched) resolvedColId = matched.id;
+      }
+    }
+
+    const { error } = await supabase
+      .from('tasks')
+      .update({
+        column_id: resolvedColId,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', taskId);
+
+    if (error) {
+      console.warn('moveTaskInSupabase error:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('moveTaskInSupabase exception:', err);
+    return false;
+  }
+}
+
+export async function deleteTaskInSupabase(taskId: string): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase) return false;
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!isUuid.test(taskId)) return false;
+
+  try {
+    const { error } = await supabase
+      .from('tasks')
+      .delete()
+      .eq('id', taskId);
+
+    if (error) {
+      console.warn('deleteTaskInSupabase error:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('deleteTaskInSupabase exception:', err);
+    return false;
+  }
+}
+
+export async function addTaskCommentInSupabase(
+  taskId: string,
+  userId: string,
+  content: string
+): Promise<any> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!isUuid.test(taskId)) return null;
+
+  try {
+    let validUserId = userId;
+    if (!isUuid.test(userId)) {
+      const { data: u } = await supabase.from('users').select('id').or(`clerk_id.eq.${userId},email.eq.${userId}`).maybeSingle();
+      if (u) validUserId = u.id;
+    }
+
+    const { data, error } = await supabase
+      .from('task_comments')
+      .insert({
+        task_id: taskId,
+        user_id: validUserId,
+        content
+      })
+      .select('*, users(*)')
+      .single();
+
+    if (error) {
+      console.warn('addTaskCommentInSupabase error:', error);
+      return null;
+    }
+    return data;
+  } catch (err) {
+    console.warn('addTaskCommentInSupabase exception:', err);
+    return null;
+  }
+}
+
+export async function syncLocalTasksToSupabase(tasks: Task[], orgId: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase || !tasks || tasks.length === 0) return;
+
+  try {
+    const { data: existing } = await supabase
+      .from('tasks')
+      .select('id, title')
+      .eq('organization_id', orgId);
+
+    const existingTitles = new Set((existing || []).map((e: any) => e.title?.toLowerCase().trim()));
+
+    for (const t of tasks) {
+      if (!existingTitles.has(t.title?.toLowerCase().trim())) {
+        await createTaskInSupabase({
+          orgId,
+          boardId: t.board_id,
+          columnId: t.column_id,
+          title: t.title,
+          description: t.description,
+          priority: t.priority,
+          assignedTo: t.assigned_to,
+          dueDate: t.due_date,
+          createdBy: t.created_by,
+          teamId: t.team_id,
+          deptId: t.department_id,
+          position: t.position
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('syncLocalTasksToSupabase exception:', err);
+  }
+}
+
 

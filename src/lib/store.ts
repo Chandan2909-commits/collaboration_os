@@ -241,13 +241,55 @@ export const SEED_BOARD: Board = {
   columns: DEFAULT_BOARD_COLUMNS
 };
 
+// Initial Boards & Columns
+export const SEED_BOARDS: Board[] = [
+  SEED_BOARD,
+  {
+    id: 'brd_team_frontend',
+    organization_id: 'org_crosstech',
+    department_id: 'dept_tech',
+    team_id: 'team_frontend',
+    name: 'Frontend Core Sprint Board',
+    description: 'Sprint board for Frontend Core & UI Systems',
+    columns: DEFAULT_BOARD_COLUMNS
+  },
+  {
+    id: 'brd_team_backend',
+    organization_id: 'org_crosstech',
+    department_id: 'dept_tech',
+    team_id: 'team_backend',
+    name: 'Backend & Cloud Sprint Board',
+    description: 'Sprint board for Cloud Services & Database',
+    columns: DEFAULT_BOARD_COLUMNS
+  },
+  {
+    id: 'brd_team_ai',
+    organization_id: 'org_crosstech',
+    department_id: 'dept_tech',
+    team_id: 'team_ai',
+    name: 'AI Agents Sprint Board',
+    description: 'Sprint board for AI Agent Systems',
+    columns: DEFAULT_BOARD_COLUMNS
+  },
+  {
+    id: 'brd_team_design',
+    organization_id: 'org_crosstech',
+    department_id: 'dept_product',
+    team_id: 'team_design',
+    name: 'Design Systems Sprint Board',
+    description: 'Sprint board for Design Systems & UX',
+    columns: DEFAULT_BOARD_COLUMNS
+  }
+];
+
 // Initial Tasks
 export const SEED_TASKS: Task[] = [
   {
     id: 'tsk_1',
     organization_id: 'org_crosstech',
     department_id: 'dept_tech',
-    board_id: 'brd_q4_sprint',
+    team_id: 'team_backend',
+    board_id: 'brd_team_backend',
     column_id: 'col_in_progress',
     title: 'Implement Multi-Tenant RLS isolation in Supabase PostgreSQL',
     description: 'Enforce organization_id scoping at the database level and ensure cross-tenant leaks are mathematically impossible.',
@@ -270,7 +312,8 @@ export const SEED_TASKS: Task[] = [
     id: 'tsk_2',
     organization_id: 'org_crosstech',
     department_id: 'dept_product',
-    board_id: 'brd_q4_sprint',
+    team_id: 'team_design',
+    board_id: 'brd_team_design',
     column_id: 'col_in_progress',
     title: 'Embed ONIX Floating Island & Dark-Blue Hero Card System',
     description: 'Incorporate 56px sticky topbar, collapsible 224px island sidebar, and 135deg linear gradient hero headers.',
@@ -284,7 +327,8 @@ export const SEED_TASKS: Task[] = [
     id: 'tsk_3',
     organization_id: 'org_crosstech',
     department_id: 'dept_tech',
-    board_id: 'brd_q4_sprint',
+    team_id: 'team_frontend',
+    board_id: 'brd_team_frontend',
     column_id: 'col_todo',
     title: 'Clerk Authentication & Webhook Sync to Supabase Users',
     description: 'Handle user.created and user.updated webhooks to atomically insert records into the public.users and organization_memberships tables.',
@@ -298,7 +342,8 @@ export const SEED_TASKS: Task[] = [
     id: 'tsk_4',
     organization_id: 'org_crosstech',
     department_id: 'dept_product',
-    board_id: 'brd_q4_sprint',
+    team_id: 'team_design',
+    board_id: 'brd_team_design',
     column_id: 'col_review',
     title: 'Build Pure Vector SVG Dual Bézier Activity & Speedometer Gauges',
     description: 'Zero external chart dependency requirement. Pure responsive SVG math for cubic Bézier curves and 180° dial gauges.',
@@ -312,7 +357,8 @@ export const SEED_TASKS: Task[] = [
     id: 'tsk_5',
     organization_id: 'org_crosstech',
     department_id: 'dept_tech',
-    board_id: 'brd_q4_sprint',
+    team_id: 'team_frontend',
+    board_id: 'brd_team_frontend',
     column_id: 'col_done',
     title: 'RBAC Permission Hierarchy Matrix Specifications',
     description: 'Definitive mapping for Platform Admin, Org Owner, Admin, Dept Manager, Team Lead, and Member.',
@@ -326,7 +372,8 @@ export const SEED_TASKS: Task[] = [
     id: 'tsk_6',
     organization_id: 'org_crosstech',
     department_id: 'dept_tech',
-    board_id: 'brd_q4_sprint',
+    team_id: 'team_ai',
+    board_id: 'brd_team_ai',
     column_id: 'col_backlog',
     title: 'Enterprise Single Sign-On (SAML / Okta) Integration',
     description: 'Support enterprise custom SAML connections for Fortune 500 organization tenants.',
@@ -340,7 +387,8 @@ export const SEED_TASKS: Task[] = [
     id: 'tsk_7',
     organization_id: 'org_crosstech',
     department_id: 'dept_ops',
-    board_id: 'brd_q4_sprint',
+    team_id: 'team_backend',
+    board_id: 'brd_team_backend',
     column_id: 'col_in_progress',
     title: 'Quarterly SOC2 Type II Audit & Employee Access Certification',
     description: 'Review access logs and revoke stale privileges across infrastructure.',
@@ -354,7 +402,8 @@ export const SEED_TASKS: Task[] = [
     id: 'tsk_8',
     organization_id: 'org_crosstech',
     department_id: 'dept_growth',
-    board_id: 'brd_q4_sprint',
+    team_id: 'team_ai',
+    board_id: 'brd_team_ai',
     column_id: 'col_todo',
     title: 'Enterprise Account Expansion Playbook & Customer Success SLA',
     description: 'Deploy tier-1 priority SLA response flows and quarterly health check cadences.',

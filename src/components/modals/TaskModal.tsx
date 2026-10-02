@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Kanban, MessageSquare, Trash2, Send } from 'lucide-react';
+import { X, Kanban, MessageSquare, Trash2, Send, CheckCircle } from 'lucide-react';
 import { useApp } from '@/lib/AppContext';
 import { Task, TaskPriority } from '@/lib/types';
 
@@ -14,6 +14,7 @@ export function TaskModal() {
     board,
     users,
     departments,
+    teams,
     currentUser,
     currentUserMembership,
     addTask,
@@ -27,6 +28,7 @@ export function TaskModal() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [departmentId, setDepartmentId] = useState('');
+  const [teamId, setTeamId] = useState('');
   const [columnId, setColumnId] = useState(board.columns?.[0]?.id || 'col_backlog');
   const [priority, setPriority] = useState<TaskPriority>('MEDIUM');
   const [assignedTo, setAssignedTo] = useState('');
@@ -38,6 +40,7 @@ export function TaskModal() {
       setTitle(activeTaskForModal.title);
       setDescription(activeTaskForModal.description || '');
       setDepartmentId(activeTaskForModal.department_id || currentUserMembership?.department_id || departments[0]?.id || '');
+      setTeamId(activeTaskForModal.team_id || currentUserMembership?.team_id || '');
       setColumnId(activeTaskForModal.column_id);
       setPriority(activeTaskForModal.priority);
       setAssignedTo(activeTaskForModal.assigned_to || '');
@@ -49,7 +52,9 @@ export function TaskModal() {
     } else {
       setTitle('');
       setDescription('');
-      setDepartmentId(currentUserMembership?.department_id || departments[0]?.id || '');
+      const defaultDept = currentUserMembership?.department_id || departments[0]?.id || '';
+      setDepartmentId(defaultDept);
+      setTeamId(currentUserMembership?.team_id || '');
       setColumnId(board.columns?.[0]?.id || 'col_backlog');
       setPriority('MEDIUM');
       setAssignedTo(users[0]?.id || '');
@@ -64,6 +69,10 @@ export function TaskModal() {
     setActiveTaskForModal(null);
   };
 
+  const isDoneColumn =
+    columnId === 'col_done' ||
+    Boolean(board.columns?.find(c => c.id === columnId && c.name.toLowerCase() === 'done'));
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -76,7 +85,8 @@ export function TaskModal() {
         priority,
         assigned_to: assignedTo || undefined,
         due_date: dueDate ? `${dueDate}T18:00:00Z` : undefined,
-        department_id: departmentId || undefined
+        department_id: departmentId || undefined,
+        team_id: teamId || undefined
       });
     } else {
       addTask({
@@ -86,7 +96,8 @@ export function TaskModal() {
         priority,
         assigned_to: assignedTo || undefined,
         due_date: dueDate ? `${dueDate}T18:00:00Z` : undefined,
-        department_id: departmentId || undefined
+        department_id: departmentId || undefined,
+        team_id: teamId || undefined
       });
     }
 
@@ -191,19 +202,70 @@ export function TaskModal() {
               </div>
             </div>
 
-            <div>
-              <label className="settings-label">Target Department</label>
-              <select
-                className="settings-input"
-                value={departmentId}
-                onChange={e => setDepartmentId(e.target.value)}
+            {/* Permanent Retention Notice for Completed Tasks */}
+            {isDoneColumn && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 14px',
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: '10px',
+                  color: '#166534',
+                  fontSize: '0.8125rem',
+                  fontWeight: 500
+                }}
               >
-                {departments.map(d => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
+                <CheckCircle style={{ width: 16, height: 16, color: '#16a34a', flexShrink: 0 }} />
+                <span>
+                  <strong>Completed Task:</strong> This task stays on the sprint board permanently until you or an admin explicitly deletes it.
+                </span>
+              </div>
+            )}
+
+            <div className="settings-grid-2">
+              <div>
+                <label className="settings-label">Target Department</label>
+                <select
+                  className="settings-input"
+                  value={departmentId}
+                  onChange={e => {
+                    const newDept = e.target.value;
+                    setDepartmentId(newDept);
+                    const deptTeams = teams.filter(t => t.department_id === newDept);
+                    if (!deptTeams.some(t => t.id === teamId)) {
+                      setTeamId(deptTeams[0]?.id || '');
+                    }
+                  }}
+                >
+                  <option value="">-- No Department --</option>
+                  {departments.map(d => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="settings-label">Target Team (Kanban Board)</label>
+                <select
+                  className="settings-input"
+                  value={teamId}
+                  onChange={e => setTeamId(e.target.value)}
+                >
+                  <option value="">-- All / General Board --</option>
+                  {teams
+                    .filter(t => !departmentId || t.department_id === departmentId)
+                    .map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
             </div>
 
             <div className="settings-grid-2">

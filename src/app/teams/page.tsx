@@ -240,7 +240,7 @@ export default function TeamsPage() {
                 }}
               >
                 <Link
-                  href="/kanban"
+                  href={`/kanban?teamId=${team.id}`}
                   style={{
                     display: 'flex',
                     alignItems: 'center',

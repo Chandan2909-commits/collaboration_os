@@ -20,7 +20,13 @@ import {
   acceptInvitationInSupabase,
   fetchMessagesFromSupabase,
   sendMessageInSupabase,
-  createChannelInSupabase
+  createChannelInSupabase,
+  createTaskInSupabase,
+  updateTaskInSupabase,
+  moveTaskInSupabase,
+  deleteTaskInSupabase,
+  addTaskCommentInSupabase,
+  syncLocalTasksToSupabase
 } from './sync';
 import {
   Organization,
@@ -51,6 +57,7 @@ import {
   SEED_DEPARTMENTS,
   SEED_TEAMS,
   SEED_BOARD,
+  SEED_BOARDS,
   SEED_TASKS,
   SEED_CHANNELS,
   SEED_MESSAGES,
@@ -92,8 +99,9 @@ interface AppContextType {
   deleteTeam: (teamId: string) => Promise<boolean>;
   
   board: Board;
+  boards: Board[];
   tasks: Task[];
-  addTask: (task: { title: string; description?: string; column_id: string; priority: Task['priority']; assigned_to?: string; due_date?: string; department_id?: string }) => Task;
+  addTask: (task: { title: string; description?: string; column_id: string; priority: Task['priority']; assigned_to?: string; due_date?: string; department_id?: string; team_id?: string; board_id?: string }) => Task;
   moveTask: (taskId: string, targetColId: string) => void;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   deleteTask: (taskId: string) => void;
@@ -329,7 +337,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return [];
   });
 
-  const [board, setBoard] = useState<Board>(SEED_BOARD);
+  const [boards, setBoards] = useState<Board[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('crosstech_boards');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return SEED_BOARDS;
+  });
+
+  const [board, setBoard] = useState<Board>(() => boards[0] || SEED_BOARD);
+
   const [tasks, setTasks] = useState<Task[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -340,7 +362,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       } catch {}
     }
-    return [];
+    return SEED_TASKS;
   });
 
   const [channels, setChannels] = useState<Channel[]>(() => {
@@ -441,10 +463,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Continuous localStorage persistence
   useEffect(() => {
-    if (tasks.length > 0) {
-      try { localStorage.setItem('crosstech_tasks', JSON.stringify(tasks)); } catch {}
-    }
+    try { localStorage.setItem('crosstech_tasks', JSON.stringify(tasks)); } catch {}
   }, [tasks]);
+
+  useEffect(() => {
+    if (boards.length > 0) {
+      try { localStorage.setItem('crosstech_boards', JSON.stringify(boards)); } catch {}
+    }
+  }, [boards]);
 
   useEffect(() => {
     if (departments.length > 0) {
@@ -555,15 +581,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           } catch {}
         }
 
-        if (wsData.tasks) {
-          setTasks(wsData.tasks);
+        if (wsData.boards && wsData.boards.length > 0) {
+          setBoards(wsData.boards);
+          setBoard(wsData.boards[0]);
           try {
-            localStorage.setItem('crosstech_tasks', JSON.stringify(wsData.tasks));
+            localStorage.setItem('crosstech_boards', JSON.stringify(wsData.boards));
           } catch {}
         }
 
-        if (wsData.boards && wsData.boards.length > 0) {
-          setBoard(wsData.boards[0]);
+        if (wsData.tasks && wsData.tasks.length > 0) {
+          setTasks(prev => {
+            const dbTaskIds = new Set(wsData.tasks!.map(t => t.id));
+            const localOnly = prev.filter(t => !dbTaskIds.has(t.id));
+            const merged = [...wsData.tasks!, ...localOnly];
+            try {
+              localStorage.setItem('crosstech_tasks', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        } else {
+          // If Supabase has no tasks yet, preserve local tasks and push to Supabase!
+          setTasks(prev => {
+            const preserved = prev.length > 0 ? prev : SEED_TASKS;
+            try {
+              localStorage.setItem('crosstech_tasks', JSON.stringify(preserved));
+            } catch {}
+            if (wsData.organizations && wsData.organizations.length > 0) {
+              syncLocalTasksToSupabase(preserved, wsData.organizations[0].id);
+            }
+            return preserved;
+          });
         }
 
         if (wsData.channels && wsData.channels.length > 0) {
@@ -1405,6 +1452,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       members_count: 1,
       created_at: new Date().toISOString()
     };
+
+    const teamBoard: Board = {
+      id: `brd_${tempId}`,
+      organization_id: targetOrgId,
+      department_id: team.department_id,
+      team_id: tempId,
+      name: `${team.name} Sprint Board`,
+      description: `Sprint board for ${team.name}`,
+      columns: DEFAULT_BOARD_COLUMNS
+    };
+
+    setBoards(prev => {
+      const next = [...prev, teamBoard];
+      try { localStorage.setItem('crosstech_boards', JSON.stringify(next)); } catch {}
+      return next;
+    });
     
     setTeams(prev => {
       const next = [...prev, newTeam];
@@ -1547,13 +1610,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     assigned_to?: string;
     due_date?: string;
     department_id?: string;
+    team_id?: string;
+    board_id?: string;
   }) => {
     triggerLoader();
+    const tempId = `tsk_${Date.now()}`;
+    const targetDeptId = task.department_id || currentUserMembership?.department_id || (departments[0]?.id || 'dept_tech');
+    const targetTeamId = task.team_id || currentUserMembership?.team_id || undefined;
+    
+    // Find matching board for team or department
+    const matchingBoard = boards.find(b => (targetTeamId && b.team_id === targetTeamId) || (b.department_id === targetDeptId && !b.team_id)) || board;
+
     const newTask: Task = {
-      id: `tsk_${Date.now()}`,
+      id: tempId,
       organization_id: currentOrg.id,
-      department_id: task.department_id || currentUserMembership?.department_id || 'dept_tech',
-      board_id: board.id,
+      department_id: targetDeptId,
+      team_id: targetTeamId,
+      board_id: task.board_id || matchingBoard?.id || board.id,
       column_id: task.column_id,
       title: task.title,
       description: task.description,
@@ -1565,7 +1638,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       created_at: new Date().toISOString(),
       comments: []
     };
-    setTasks(prev => [newTask, ...prev]);
+
+    setTasks(prev => {
+      const next = [newTask, ...prev];
+      try { localStorage.setItem('crosstech_tasks', JSON.stringify(next)); } catch {}
+      return next;
+    });
+
+    // Asynchronously save to Supabase
+    createTaskInSupabase({
+      orgId: currentOrg.id,
+      boardId: task.board_id || matchingBoard?.id,
+      columnId: task.column_id,
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      assignedTo: task.assigned_to,
+      dueDate: task.due_date,
+      createdBy: currentUser.id,
+      teamId: targetTeamId,
+      deptId: targetDeptId
+    }).then(res => {
+      if (res?.id) {
+        setTasks(prev => {
+          const updated = prev.map(t => (t.id === tempId ? { ...t, id: res.id, board_id: res.board_id, column_id: res.column_id } : t));
+          try { localStorage.setItem('crosstech_tasks', JSON.stringify(updated)); } catch {}
+          return updated;
+        });
+      }
+    }).catch(err => {
+      console.warn('Failed to save task to Supabase:', err);
+    });
 
     setAuditLogs(prev => [
       {
@@ -1585,9 +1688,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const moveTask = (taskId: string, targetColId: string) => {
-    setTasks(prev =>
-      prev.map(t => (t.id === taskId ? { ...t, column_id: targetColId, updated_at: new Date().toISOString() } : t))
-    );
+    setTasks(prev => {
+      const next = prev.map(t => (t.id === taskId ? { ...t, column_id: targetColId, updated_at: new Date().toISOString() } : t));
+      try { localStorage.setItem('crosstech_tasks', JSON.stringify(next)); } catch {}
+      return next;
+    });
+
+    moveTaskInSupabase(taskId, targetColId).catch(err => {
+      console.warn('Failed to move task in Supabase:', err);
+    });
 
     setAuditLogs(prev => [
       {
@@ -1605,17 +1714,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateTask = (taskId: string, updates: Partial<Task>) => {
-    setTasks(prev =>
-      prev.map(t => (t.id === taskId ? { ...t, ...updates, updated_at: new Date().toISOString() } : t))
-    );
+    setTasks(prev => {
+      const next = prev.map(t => (t.id === taskId ? { ...t, ...updates, updated_at: new Date().toISOString() } : t));
+      try { localStorage.setItem('crosstech_tasks', JSON.stringify(next)); } catch {}
+      return next;
+    });
+
+    updateTaskInSupabase(taskId, updates).catch(err => {
+      console.warn('Failed to update task in Supabase:', err);
+    });
   };
 
   const deleteTask = (taskId: string) => {
     triggerLoader();
-    setTasks(prev => prev.filter(t => t.id !== taskId));
+    setTasks(prev => {
+      const next = prev.filter(t => t.id !== taskId);
+      try { localStorage.setItem('crosstech_tasks', JSON.stringify(next)); } catch {}
+      return next;
+    });
     if (activeTaskForModal?.id === taskId) {
       setActiveTaskForModal(null);
     }
+
+    deleteTaskInSupabase(taskId).catch(err => {
+      console.warn('Failed to delete task in Supabase:', err);
+    });
   };
 
   const addTaskComment = (taskId: string, content: string) => {
@@ -1628,13 +1751,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       created_at: new Date().toISOString()
     };
 
-    setTasks(prev =>
-      prev.map(t => (t.id === taskId ? { ...t, comments: [...(t.comments || []), comment] } : t))
-    );
+    setTasks(prev => {
+      const next = prev.map(t => (t.id === taskId ? { ...t, comments: [...(t.comments || []), comment] } : t));
+      try { localStorage.setItem('crosstech_tasks', JSON.stringify(next)); } catch {}
+      return next;
+    });
 
     if (activeTaskForModal?.id === taskId) {
       setActiveTaskForModal(prev => (prev ? { ...prev, comments: [...(prev.comments || []), comment] } : null));
     }
+
+    addTaskCommentInSupabase(taskId, currentUser.id, content).catch(err => {
+      console.warn('Failed to add comment in Supabase:', err);
+    });
   };
 
   const addChannel = (channel: { name: string; type: Channel['type']; description?: string; department_id?: string; team_id?: string }) => {
@@ -1931,6 +2060,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addTeam,
         deleteTeam,
         board,
+        boards,
         tasks,
         addTask,
         moveTask,
