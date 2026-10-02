@@ -356,9 +356,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem('crosstech_tasks');
-        if (saved) {
+        if (saved !== null) {
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+          if (Array.isArray(parsed)) {
+            const savedDeleted = localStorage.getItem('crosstech_deleted_task_ids');
+            const deletedSet: string[] = savedDeleted ? JSON.parse(savedDeleted) : [];
+            return parsed.filter(t => !deletedSet.includes(t.id) && (!t.title || !deletedSet.includes(t.title.trim().toLowerCase())));
+          }
         }
       } catch {}
     }
@@ -443,7 +447,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const savedTeams = localStorage.getItem('crosstech_teams');
       if (savedTeams) setTeams(JSON.parse(savedTeams));
       const savedTasks = localStorage.getItem('crosstech_tasks');
-      if (savedTasks) setTasks(JSON.parse(savedTasks));
+      if (savedTasks !== null) {
+        try {
+          const parsed = JSON.parse(savedTasks);
+          if (Array.isArray(parsed)) {
+            const savedDeleted = localStorage.getItem('crosstech_deleted_task_ids');
+            const deletedSet: string[] = savedDeleted ? JSON.parse(savedDeleted) : [];
+            setTasks(parsed.filter(t => !deletedSet.includes(t.id) && (!t.title || !deletedSet.includes(t.title.trim().toLowerCase()))));
+          }
+        } catch {}
+      }
       const savedChans = localStorage.getItem('crosstech_channels');
       if (savedChans) {
         const chans = JSON.parse(savedChans);
@@ -590,10 +603,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (wsData.tasks && wsData.tasks.length > 0) {
+          let deletedSet: string[] = [];
+          try {
+            const savedDeleted = localStorage.getItem('crosstech_deleted_task_ids');
+            if (savedDeleted) deletedSet = JSON.parse(savedDeleted);
+          } catch {}
+
+          const activeDbTasks = wsData.tasks.filter(t => {
+            const tTitle = t.title?.trim().toLowerCase();
+            return !deletedSet.includes(t.id) && (!tTitle || !deletedSet.includes(tTitle));
+          });
+
           setTasks(prev => {
-            const dbTaskIds = new Set(wsData.tasks!.map(t => t.id));
-            const localOnly = prev.filter(t => !dbTaskIds.has(t.id));
-            const merged = [...wsData.tasks!, ...localOnly];
+            const dbTaskIds = new Set(activeDbTasks.map(t => t.id));
+            const dbTaskTitles = new Set(activeDbTasks.map(t => t.title?.trim().toLowerCase()));
+            const localOnly = prev.filter(t => {
+              const tTitle = t.title?.trim().toLowerCase();
+              return !dbTaskIds.has(t.id) &&
+                (!tTitle || !dbTaskTitles.has(tTitle)) &&
+                !deletedSet.includes(t.id) &&
+                (!tTitle || !deletedSet.includes(tTitle));
+            });
+            const merged = [...activeDbTasks, ...localOnly];
             try {
               localStorage.setItem('crosstech_tasks', JSON.stringify(merged));
             } catch {}
@@ -602,7 +633,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         } else {
           // If Supabase has no tasks yet, preserve local tasks and push to Supabase!
           setTasks(prev => {
-            const preserved = prev.length > 0 ? prev : SEED_TASKS;
+            let deletedSet: string[] = [];
+            try {
+              const savedDeleted = localStorage.getItem('crosstech_deleted_task_ids');
+              if (savedDeleted) deletedSet = JSON.parse(savedDeleted);
+            } catch {}
+            const preserved = (prev.length > 0 ? prev : SEED_TASKS).filter(t => {
+              const tTitle = t.title?.trim().toLowerCase();
+              return !deletedSet.includes(t.id) && (!tTitle || !deletedSet.includes(tTitle));
+            });
             try {
               localStorage.setItem('crosstech_tasks', JSON.stringify(preserved));
             } catch {}
@@ -1727,16 +1766,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const deleteTask = (taskId: string) => {
     triggerLoader();
+    const taskToDelete = tasks.find(t => t.id === taskId);
+    const targetTitle = taskToDelete?.title?.trim().toLowerCase();
+
+    // Mark as deleted in localStorage so it never resurrects
+    try {
+      const savedDeleted = localStorage.getItem('crosstech_deleted_task_ids');
+      const deletedList: string[] = savedDeleted ? JSON.parse(savedDeleted) : [];
+      if (!deletedList.includes(taskId)) deletedList.push(taskId);
+      if (targetTitle && !deletedList.includes(targetTitle)) deletedList.push(targetTitle);
+      localStorage.setItem('crosstech_deleted_task_ids', JSON.stringify(deletedList));
+    } catch {}
+
     setTasks(prev => {
-      const next = prev.filter(t => t.id !== taskId);
+      const next = prev.filter(t => t.id !== taskId && (!targetTitle || t.title?.trim().toLowerCase() !== targetTitle));
       try { localStorage.setItem('crosstech_tasks', JSON.stringify(next)); } catch {}
       return next;
     });
+
     if (activeTaskForModal?.id === taskId) {
       setActiveTaskForModal(null);
     }
 
-    deleteTaskInSupabase(taskId).catch(err => {
+    setAuditLogs(prev => [
+      {
+        id: `aud_${Date.now()}`,
+        organization_id: currentOrg.id,
+        actor_id: currentUser.id,
+        action: 'task.delete',
+        resource_type: 'Task',
+        resource_id: taskId,
+        metadata: { title: taskToDelete?.title },
+        created_at: new Date().toISOString()
+      },
+      ...prev
+    ]);
+
+    deleteTaskInSupabase(taskId, taskToDelete?.title, currentOrg.id).catch(err => {
       console.warn('Failed to delete task in Supabase:', err);
     });
   };

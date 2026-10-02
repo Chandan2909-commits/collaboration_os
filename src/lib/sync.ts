@@ -1509,20 +1509,20 @@ export async function moveTaskInSupabase(
   }
 }
 
-export async function deleteTaskInSupabase(taskId: string): Promise<boolean> {
+export async function deleteTaskInSupabase(taskId: string, title?: string, orgId?: string): Promise<boolean> {
   if (!isSupabaseConfigured || !supabase) return false;
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!isUuid.test(taskId)) return false;
 
   try {
-    const { error } = await supabase
-      .from('tasks')
-      .delete()
-      .eq('id', taskId);
-
-    if (error) {
-      console.warn('deleteTaskInSupabase error:', error);
-      return false;
+    if (isUuid.test(taskId)) {
+      await supabase.from('tasks').delete().eq('id', taskId);
+    }
+    if (title) {
+      let query = supabase.from('tasks').delete().ilike('title', title.trim());
+      if (orgId && isUuid.test(orgId)) {
+        query = query.eq('organization_id', orgId);
+      }
+      await query;
     }
     return true;
   } catch (err) {
@@ -1568,8 +1568,12 @@ export async function addTaskCommentInSupabase(
   }
 }
 
+let isSyncingTasksRunning = false;
+
 export async function syncLocalTasksToSupabase(tasks: Task[], orgId: string): Promise<void> {
   if (!isSupabaseConfigured || !supabase || !tasks || tasks.length === 0) return;
+  if (isSyncingTasksRunning) return;
+  isSyncingTasksRunning = true;
 
   try {
     const { data: existing } = await supabase
@@ -1579,8 +1583,22 @@ export async function syncLocalTasksToSupabase(tasks: Task[], orgId: string): Pr
 
     const existingTitles = new Set((existing || []).map((e: any) => e.title?.toLowerCase().trim()));
 
+    // Check deleted task titles and IDs in localStorage
+    let deletedSet: string[] = [];
+    if (typeof window !== 'undefined') {
+      try {
+        const savedDeleted = localStorage.getItem('crosstech_deleted_task_ids');
+        if (savedDeleted) deletedSet = JSON.parse(savedDeleted);
+      } catch {}
+    }
+
     for (const t of tasks) {
-      if (!existingTitles.has(t.title?.toLowerCase().trim())) {
+      const titleLower = t.title?.toLowerCase().trim();
+      if (deletedSet.includes(t.id) || (titleLower && deletedSet.includes(titleLower))) {
+        continue;
+      }
+      if (titleLower && !existingTitles.has(titleLower)) {
+        existingTitles.add(titleLower);
         await createTaskInSupabase({
           orgId,
           boardId: t.board_id,
@@ -1599,6 +1617,8 @@ export async function syncLocalTasksToSupabase(tasks: Task[], orgId: string): Pr
     }
   } catch (err) {
     console.warn('syncLocalTasksToSupabase exception:', err);
+  } finally {
+    isSyncingTasksRunning = false;
   }
 }
 

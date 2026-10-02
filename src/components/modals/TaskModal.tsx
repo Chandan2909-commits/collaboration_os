@@ -34,6 +34,7 @@ export function TaskModal() {
   const [assignedTo, setAssignedTo] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [newComment, setNewComment] = useState('');
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
   useEffect(() => {
     if (activeTaskForModal) {
@@ -65,6 +66,7 @@ export function TaskModal() {
   if (!isTaskModalOpen) return null;
 
   const handleClose = () => {
+    setIsConfirmingDelete(false);
     setIsTaskModalOpen(false);
     setActiveTaskForModal(null);
   };
@@ -113,10 +115,9 @@ export function TaskModal() {
 
   const handleDelete = () => {
     if (!activeTaskForModal) return;
-    if (confirm('Are you sure you want to delete this task?')) {
-      deleteTask(activeTaskForModal.id);
-      handleClose();
-    }
+    deleteTask(activeTaskForModal.id);
+    setIsConfirmingDelete(false);
+    handleClose();
   };
 
   const priorityColors: Record<TaskPriority, { bg: string; color: string }> = {
@@ -372,15 +373,46 @@ export function TaskModal() {
 
           <div className="modal-card-footer" style={{ justifyContent: 'space-between' }}>
             {isEditing ? (
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="btn btn-destructive btn-sm"
-                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-              >
-                <Trash2 style={{ width: 14, height: 14 }} />
-                <span>Delete Task</span>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {isConfirmingDelete ? (
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    className="btn btn-destructive btn-sm"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      backgroundColor: '#dc2626',
+                      color: '#ffffff',
+                      border: '1px solid #b91c1c'
+                    }}
+                  >
+                    <Trash2 style={{ width: 14, height: 14 }} />
+                    <span>Confirm Delete?</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmingDelete(true)}
+                    className="btn btn-destructive btn-sm"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Trash2 style={{ width: 14, height: 14 }} />
+                    <span>Delete Task</span>
+                  </button>
+                )}
+                {isConfirmingDelete && (
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmingDelete(false)}
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: '0.8125rem', color: '#64748b' }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
             ) : (
               <div />
             )}

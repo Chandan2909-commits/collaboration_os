@@ -196,11 +196,9 @@ function KanbanPageContent() {
     }
   };
 
-  const handleDeleteTaskPrompt = (e: React.MouseEvent, taskId: string, taskTitle: string) => {
+  const handleDeleteTask = (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation();
-    if (confirm(`Are you sure you want to permanently delete task "${taskTitle}"?`)) {
-      deleteTask(taskId);
-    }
+    deleteTask(taskId);
   };
 
   const completedCount = useMemo(() => {
@@ -701,7 +699,7 @@ function KanbanPageContent() {
                             <button
                               type="button"
                               title="Delete Task"
-                              onClick={e => handleDeleteTaskPrompt(e, task.id, task.title)}
+                              onClick={e => handleDeleteTask(e, task.id)}
                               style={{
                                 padding: '2px',
                                 borderRadius: '4px',
