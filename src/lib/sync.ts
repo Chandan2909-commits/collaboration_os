@@ -1122,6 +1122,63 @@ export async function fetchMessagesFromSupabase(channelId?: string): Promise<Mes
   }
 }
 
+export async function fetchTasksFromSupabase(orgId?: string): Promise<Task[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+  try {
+    let query = supabase
+      .from('tasks')
+      .select('*, boards(id, department_id, team_id), task_comments(*, users(*))')
+      .order('position', { ascending: true });
+
+    if (orgId) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (isUuid.test(orgId)) {
+        query = query.eq('organization_id', orgId);
+      }
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.warn('fetchTasksFromSupabase error:', error);
+      return [];
+    }
+
+    return (data || []).map((t: any) => ({
+      id: t.id,
+      organization_id: t.organization_id,
+      board_id: t.board_id,
+      column_id: t.column_id,
+      department_id: t.boards?.department_id || undefined,
+      team_id: t.boards?.team_id || undefined,
+      title: t.title,
+      description: t.description || '',
+      created_by: t.created_by,
+      assigned_to: t.assigned_to,
+      priority: t.priority || 'MEDIUM',
+      position: t.position || 1000,
+      due_date: t.due_date,
+      created_at: t.created_at,
+      updated_at: t.updated_at,
+      comments: (t.task_comments || []).map((c: any) => ({
+        id: c.id,
+        task_id: c.task_id,
+        user_id: c.user_id,
+        content: c.content,
+        created_at: c.created_at,
+        user: c.users ? {
+          id: c.users.id,
+          email: c.users.email,
+          full_name: c.users.full_name,
+          avatar_url: c.users.avatar_url
+        } : undefined
+      }))
+    }));
+  } catch (err) {
+    console.warn('fetchTasksFromSupabase exception:', err);
+    return [];
+  }
+}
+
 export async function sendMessageInSupabase(
   channelId: string,
   senderId: string,

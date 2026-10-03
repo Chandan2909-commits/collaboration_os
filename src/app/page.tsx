@@ -21,7 +21,7 @@ import {
 import { useApp } from '@/lib/AppContext';
 import { SignatureHero } from '@/components/layout/SignatureHero';
 import { DualBezierChart, SpeedometerGauge, CircularProgressRing } from '@/components/charts/SvgCharts';
-import { TaskPriority } from '@/lib/types';
+import { Task, TaskPriority } from '@/lib/types';
 
 export default function DashboardOverviewPage() {
   const {
@@ -32,6 +32,8 @@ export default function DashboardOverviewPage() {
     departments,
     teams,
     tasks,
+    board,
+    boards,
     channels,
     auditLogs,
     moveTask,
@@ -52,16 +54,70 @@ export default function DashboardOverviewPage() {
   const myTasks = tasks.filter(t => t.assigned_to === currentUser.id);
   const myDeptTasks = tasks.filter(t => t.department_id === (userDeptId || departments[0]?.id));
 
-  // Executive stats
+  // Robust column matching helper (supports UUIDs, slugs, custom board column variations)
+  const normalizeColSlug = (str?: string): string => {
+    if (!str) return '';
+    const clean = str.toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '');
+    if (clean === 'todo' || clean === 'todos' || clean === 'to_do') return 'todo';
+    if (clean === 'inreview' || clean === 'review' || clean === 'underreview') return 'review';
+    if (clean === 'inprogress' || clean === 'progress' || clean === 'doing' || clean === 'active') return 'inprogress';
+    if (clean === 'backlog') return 'backlog';
+    if (clean === 'done' || clean === 'completed' || clean === 'finished' || clean === 'closed') return 'done';
+    return clean;
+  };
+
+  const isTaskDone = (t: Task): boolean => {
+    if (!t.column_id) return false;
+    const slug = normalizeColSlug(t.column_id);
+    if (slug === 'done' || slug === 'completed' || slug === 'closed') return true;
+    for (const b of (boards || [])) {
+      const col = (b.columns || []).find(c => c.id === t.column_id);
+      if (col) {
+        const cSlug = normalizeColSlug(col.name) || normalizeColSlug(col.id);
+        if (cSlug === 'done' || cSlug === 'completed' || cSlug === 'closed') return true;
+      }
+    }
+    return false;
+  };
+
+  const isTaskInProgress = (t: Task): boolean => {
+    if (!t.column_id) return false;
+    const slug = normalizeColSlug(t.column_id);
+    if (slug === 'inprogress' || slug === 'progress' || slug === 'doing') return true;
+    for (const b of (boards || [])) {
+      const col = (b.columns || []).find(c => c.id === t.column_id);
+      if (col) {
+        const cSlug = normalizeColSlug(col.name) || normalizeColSlug(col.id);
+        if (cSlug === 'inprogress' || cSlug === 'progress' || cSlug === 'doing') return true;
+      }
+    }
+    return false;
+  };
+
+  const isTaskInReview = (t: Task): boolean => {
+    if (!t.column_id) return false;
+    const slug = normalizeColSlug(t.column_id);
+    if (slug === 'review') return true;
+    for (const b of (boards || [])) {
+      const col = (b.columns || []).find(c => c.id === t.column_id);
+      if (col) {
+        const cSlug = normalizeColSlug(col.name) || normalizeColSlug(col.id);
+        if (cSlug === 'review') return true;
+      }
+    }
+    return false;
+  };
+
+  // Executive stats (live from real tasks)
   const totalTasks = tasks.length;
-  const inProgressTasks = tasks.filter(t => t.column_id === 'col_in_progress').length;
-  const doneTasks = tasks.filter(t => t.column_id === 'col_done').length;
+  const inProgressTasks = tasks.filter(isTaskInProgress).length;
+  const doneTasks = tasks.filter(isTaskDone).length;
   const completionRate = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
   const velocityScore = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 1000) / 10 : 0;
 
   // Manager stats
   const deptTotalTasks = myDeptTasks.length;
-  const deptDoneTasks = myDeptTasks.filter(t => t.column_id === 'col_done').length;
+  const deptDoneTasks = myDeptTasks.filter(isTaskDone).length;
   const deptCompletionRate = deptTotalTasks > 0 ? Math.round((deptDoneTasks / deptTotalTasks) * 100) : 0;
   const deptVelocityScore = deptTotalTasks > 0 ? Math.round((deptDoneTasks / deptTotalTasks) * 1000) / 10 : 0;
   const deptTeams = teams.filter(t => t.department_id === userDeptId);
@@ -94,7 +150,7 @@ export default function DashboardOverviewPage() {
       }
     }
 
-    if (t.column_id === 'col_done') {
+    if (isTaskDone(t)) {
       const rDate = t.updated_at ? new Date(t.updated_at) : (cDate || null);
       if (rDate && !isNaN(rDate.getTime())) {
         if (rDate < monday) {
@@ -136,22 +192,26 @@ export default function DashboardOverviewPage() {
   };
 
   const getColumnName = (colId: string) => {
-    switch (colId) {
-      case 'col_backlog': return 'Backlog';
-      case 'col_todo': return 'To Do';
-      case 'col_in_progress': return 'In Progress';
-      case 'col_review': return 'In Review';
-      case 'col_done': return 'Done';
-      default: return 'Active';
+    if (!colId) return 'Backlog';
+    for (const b of (boards || [])) {
+      const col = (b.columns || []).find(c => c.id === colId);
+      if (col?.name) return col.name;
     }
+    const clean = normalizeColSlug(colId);
+    if (clean === 'backlog') return 'Backlog';
+    if (clean === 'todo') return 'To Do';
+    if (clean === 'inprogress') return 'In Progress';
+    if (clean === 'review') return 'In Review';
+    if (clean === 'done') return 'Done';
+    return 'Active';
   };
 
   /* ==============================================================================
      1. EMPLOYEE & CONTRIBUTOR VIEW (Strictly Scoped: No Executive Metrics)
      ============================================================================== */
   if (isEmployee) {
-    const employeeInProgress = myTasks.filter(t => t.column_id === 'col_in_progress').length;
-    const employeeDone = myTasks.filter(t => t.column_id === 'col_done').length;
+    const employeeInProgress = myTasks.filter(isTaskInProgress).length;
+    const employeeDone = myTasks.filter(isTaskDone).length;
     const deptChannels = channels.filter(c => !c.department_id || c.department_id === userDeptId);
 
     return (
@@ -335,30 +395,42 @@ export default function DashboardOverviewPage() {
 
                         {/* Quick State Advance Buttons */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          {task.column_id !== 'col_in_progress' && task.column_id !== 'col_done' && (
+                          {!isTaskInProgress(task) && !isTaskDone(task) && (
                             <button
                               type="button"
-                              onClick={() => moveTask(task.id, 'col_in_progress')}
+                              onClick={() => {
+                                const targetB = boards.find(b => b.id === task.board_id) || board;
+                                const targetCol = (targetB?.columns || []).find(c => normalizeColSlug(c.name) === 'inprogress') || { id: 'col_in_progress' };
+                                moveTask(task.id, targetCol.id);
+                              }}
                               className="btn btn-secondary btn-sm"
                               style={{ padding: '2px 8px', fontSize: '0.6875rem' }}
                             >
                               Start Work
                             </button>
                           )}
-                          {task.column_id === 'col_in_progress' && (
+                          {isTaskInProgress(task) && (
                             <button
                               type="button"
-                              onClick={() => moveTask(task.id, 'col_review')}
+                              onClick={() => {
+                                const targetB = boards.find(b => b.id === task.board_id) || board;
+                                const targetCol = (targetB?.columns || []).find(c => normalizeColSlug(c.name) === 'review') || { id: 'col_review' };
+                                moveTask(task.id, targetCol.id);
+                              }}
                               className="btn btn-secondary btn-sm"
                               style={{ padding: '2px 8px', fontSize: '0.6875rem' }}
                             >
                               Submit for Review
                             </button>
                           )}
-                          {task.column_id !== 'col_done' && (
+                          {!isTaskDone(task) && (
                             <button
                               type="button"
-                              onClick={() => moveTask(task.id, 'col_done')}
+                              onClick={() => {
+                                const targetB = boards.find(b => b.id === task.board_id) || board;
+                                const targetCol = (targetB?.columns || []).find(c => normalizeColSlug(c.name) === 'done') || { id: 'col_done' };
+                                moveTask(task.id, targetCol.id);
+                              }}
                               className="btn btn-primary btn-sm"
                               style={{ padding: '2px 8px', fontSize: '0.6875rem', background: '#059669' }}
                             >

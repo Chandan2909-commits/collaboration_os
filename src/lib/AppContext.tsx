@@ -26,7 +26,8 @@ import {
   moveTaskInSupabase,
   deleteTaskInSupabase,
   addTaskCommentInSupabase,
-  syncLocalTasksToSupabase
+  syncLocalTasksToSupabase,
+  fetchTasksFromSupabase
 } from './sync';
 import {
   Organization,
@@ -962,6 +963,75 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
       .subscribe();
 
+    // 3b. Real-time Supabase subscription for tasks (live status, drag-and-drop, velocity metrics)
+    const realtimeTasksChannel = sb.channel('realtime_workspace_tasks')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, async payload => {
+        const eventType = payload.eventType;
+        const newRow: any = payload.new;
+        const oldRow: any = payload.old;
+
+        let deletedSet: string[] = [];
+        try {
+          const savedDeleted = localStorage.getItem('crosstech_deleted_task_ids');
+          if (savedDeleted) deletedSet = JSON.parse(savedDeleted);
+        } catch {}
+
+        if (eventType === 'DELETE' && oldRow?.id) {
+          setTasks(prev => prev.filter(t => t.id !== oldRow.id));
+        } else if (newRow) {
+          if (deletedSet.includes(newRow.id)) return;
+
+          setTasks(prev => {
+            const existingIdx = prev.findIndex(t => t.id === newRow.id);
+            if (existingIdx !== -1) {
+              const updated = [...prev];
+              updated[existingIdx] = {
+                ...updated[existingIdx],
+                ...newRow,
+                column_id: newRow.column_id,
+                board_id: newRow.board_id,
+                title: newRow.title,
+                description: newRow.description,
+                priority: newRow.priority,
+                assigned_to: newRow.assigned_to,
+                due_date: newRow.due_date,
+                updated_at: newRow.updated_at
+              };
+              return updated;
+            } else {
+              const optimisticIdx = prev.findIndex(t => t.id.startsWith('tsk_') && t.title === newRow.title);
+              if (optimisticIdx !== -1) {
+                const updated = [...prev];
+                updated[optimisticIdx] = {
+                  ...updated[optimisticIdx],
+                  ...newRow,
+                  id: newRow.id
+                };
+                return updated;
+              }
+              const newTaskItem: Task = {
+                id: newRow.id,
+                organization_id: newRow.organization_id,
+                board_id: newRow.board_id,
+                column_id: newRow.column_id,
+                title: newRow.title,
+                description: newRow.description || '',
+                created_by: newRow.created_by,
+                assigned_to: newRow.assigned_to,
+                priority: newRow.priority || 'MEDIUM',
+                position: newRow.position || 1000,
+                due_date: newRow.due_date,
+                created_at: newRow.created_at,
+                updated_at: newRow.updated_at,
+                comments: []
+              };
+              return [newTaskItem, ...prev];
+            }
+          });
+        }
+      })
+      .subscribe();
+
     // 4. Polling fallback every 3 seconds to guarantee cross-account delivery under all conditions
     const pollInterval = setInterval(() => {
       fetchMessagesFromSupabase().then(loaded => {
@@ -980,11 +1050,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           });
         }
       });
+
+      // Also sync tasks periodically to ensure live sprint velocity metrics stay completely in sync
+      fetchTasksFromSupabase().then(loadedTasks => {
+        if (loadedTasks && loadedTasks.length > 0) {
+          let deletedSet: string[] = [];
+          try {
+            const savedDeleted = localStorage.getItem('crosstech_deleted_task_ids');
+            if (savedDeleted) deletedSet = JSON.parse(savedDeleted);
+          } catch {}
+
+          const activeLoaded = loadedTasks.filter(t => !deletedSet.includes(t.id));
+          setTasks(prev => {
+            const dbMap = new Map(activeLoaded.map(t => [t.id, t]));
+            let changed = false;
+            const updated = prev.map(localTask => {
+              const remote = dbMap.get(localTask.id);
+              if (remote) {
+                if (remote.column_id !== localTask.column_id || remote.updated_at !== localTask.updated_at || remote.title !== localTask.title) {
+                  changed = true;
+                  return {
+                    ...localTask,
+                    ...remote,
+                    comments: localTask.comments?.length ? localTask.comments : remote.comments
+                  };
+                }
+              }
+              return localTask;
+            });
+
+            const localIds = new Set(prev.map(t => t.id));
+            const newRemoteTasks = activeLoaded.filter(t => !localIds.has(t.id));
+            if (newRemoteTasks.length > 0) {
+              changed = true;
+              updated.unshift(...newRemoteTasks);
+            }
+
+            return changed ? updated : prev;
+          });
+        }
+      });
     }, 3000);
 
     return () => {
       sb.removeChannel(realtimeMsgChannel);
       sb.removeChannel(realtimeChanChannel);
+      sb.removeChannel(realtimeTasksChannel);
       clearInterval(pollInterval);
     };
   }, [users]);
