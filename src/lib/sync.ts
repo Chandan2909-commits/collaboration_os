@@ -1290,18 +1290,48 @@ export async function createTaskInSupabase(params: {
       }
     }
 
+    // Resolve Team ID if slug, name or UUID is provided
+    let validTeamId: string | null = null;
+    if (params.teamId && isUuid.test(params.teamId)) {
+      validTeamId = params.teamId;
+    } else if (params.teamId) {
+      const cleanTeam = params.teamId.replace(/^team_/, '').toLowerCase();
+      const { data: dbTeams } = await supabase.from('teams').select('id, name, department_id').eq('organization_id', validOrgId);
+      const matched = (dbTeams || []).find((t: any) =>
+        t.id === params.teamId ||
+        t.name.toLowerCase().includes(cleanTeam) ||
+        cleanTeam.includes(t.name.toLowerCase())
+      );
+      if (matched) validTeamId = matched.id;
+    }
+
+    // Resolve Dept ID if slug, name or UUID is provided
+    let validDeptId: string | null = null;
+    if (params.deptId && isUuid.test(params.deptId)) {
+      validDeptId = params.deptId;
+    } else if (params.deptId) {
+      const cleanDept = params.deptId.replace(/^dept_/, '').toLowerCase();
+      const { data: dbDepts } = await supabase.from('departments').select('id, name').eq('organization_id', validOrgId);
+      const matched = (dbDepts || []).find((d: any) =>
+        d.id === params.deptId ||
+        d.name.toLowerCase().includes(cleanDept) ||
+        cleanDept.includes(d.name.toLowerCase())
+      );
+      if (matched) validDeptId = matched.id;
+    }
+
     // If no board found and teamId is provided, find or create team's board
-    if (!targetBoardId && params.teamId && isUuid.test(params.teamId)) {
-      const { data: tb } = await supabase.from('boards').select('*, board_columns(*)').eq('team_id', params.teamId).maybeSingle();
+    if (!targetBoardId && validTeamId) {
+      const { data: tb } = await supabase.from('boards').select('*, board_columns(*)').eq('team_id', validTeamId).maybeSingle();
       if (tb) {
         targetBoardId = tb.id;
         targetBoard = tb;
       } else {
-        const { data: teamObj } = await supabase.from('teams').select('name, department_id').eq('id', params.teamId).maybeSingle();
+        const { data: teamObj } = await supabase.from('teams').select('name, department_id').eq('id', validTeamId).maybeSingle();
         const { data: newTeamB } = await supabase.from('boards').insert({
           organization_id: validOrgId,
-          department_id: teamObj?.department_id || params.deptId || null,
-          team_id: params.teamId,
+          department_id: teamObj?.department_id || validDeptId || null,
+          team_id: validTeamId,
           name: `${teamObj?.name || 'Team'} Sprint Board`,
           description: `Sprint board for ${teamObj?.name || 'team'}`
         }).select().single();
@@ -1321,8 +1351,8 @@ export async function createTaskInSupabase(params: {
     }
 
     // If no board found and deptId is provided, find department's board
-    if (!targetBoardId && params.deptId && isUuid.test(params.deptId)) {
-      const { data: db } = await supabase.from('boards').select('*, board_columns(*)').eq('department_id', params.deptId).maybeSingle();
+    if (!targetBoardId && validDeptId) {
+      const { data: db } = await supabase.from('boards').select('*, board_columns(*)').eq('department_id', validDeptId).maybeSingle();
       if (db) {
         targetBoardId = db.id;
         targetBoard = db;
@@ -1364,10 +1394,11 @@ export async function createTaskInSupabase(params: {
     if (params.columnId && isUuid.test(params.columnId)) {
       targetColId = params.columnId;
     } else if (params.columnId && boardCols.length > 0) {
-      const slug = params.columnId.toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '_');
+      const cleanSlug = (params.columnId || '').toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '');
       const matched = boardCols.find((c: any) =>
         c.id === params.columnId ||
-        c.name.toLowerCase().replace(/[^a-z0-9]/g, '_') === slug
+        (c.name || '').toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '') === cleanSlug ||
+        (c.id || '').toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '') === cleanSlug
       );
       if (matched) targetColId = matched.id;
     }
@@ -1498,9 +1529,11 @@ export async function moveTaskInSupabase(
       const { data: t } = await supabase.from('tasks').select('board_id').eq('id', taskId).maybeSingle();
       if (t?.board_id) {
         const { data: cols } = await supabase.from('board_columns').select('*').eq('board_id', t.board_id);
-        const slug = targetColId.toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '_');
+        const cleanSlug = (targetColId || '').toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '');
         const matched = (cols || []).find((c: any) =>
-          c.name.toLowerCase().replace(/[^a-z0-9]/g, '_') === slug
+          c.id === targetColId ||
+          (c.name || '').toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '') === cleanSlug ||
+          (c.id || '').toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '') === cleanSlug
         );
         if (matched) resolvedColId = matched.id;
       }

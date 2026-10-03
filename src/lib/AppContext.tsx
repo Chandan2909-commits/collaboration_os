@@ -624,7 +624,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 !deletedSet.includes(t.id) &&
                 (!tTitle || !deletedSet.includes(tTitle));
             });
-            const merged = [...activeDbTasks, ...localOnly];
+            const enrichedDbTasks = activeDbTasks.map(dbTask => {
+              const localMatch = prev.find(p => p.id === dbTask.id || (p.title && dbTask.title && p.title.trim().toLowerCase() === dbTask.title.trim().toLowerCase()));
+              return {
+                ...dbTask,
+                team_id: dbTask.team_id || localMatch?.team_id || undefined,
+                department_id: dbTask.department_id || localMatch?.department_id || undefined,
+                assigned_to: dbTask.assigned_to || localMatch?.assigned_to || undefined
+              };
+            });
+            const merged = [...enrichedDbTasks, ...localOnly];
             try {
               localStorage.setItem('crosstech_tasks', JSON.stringify(merged));
             } catch {}
@@ -1687,7 +1696,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       title: task.title,
       description: task.description,
       created_by: currentUser.id,
-      assigned_to: task.assigned_to,
+      assigned_to: task.assigned_to || currentUser.id,
       priority: task.priority,
       position: tasks.length * 1000 + 1000,
       due_date: task.due_date,
@@ -1709,7 +1718,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       title: task.title,
       description: task.description,
       priority: task.priority,
-      assignedTo: task.assigned_to,
+      assignedTo: task.assigned_to || currentUser.id,
       dueDate: task.due_date,
       createdBy: currentUser.id,
       teamId: targetTeamId,
@@ -1717,7 +1726,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }).then(res => {
       if (res?.id) {
         setTasks(prev => {
-          const updated = prev.map(t => (t.id === tempId ? { ...t, id: res.id, board_id: res.board_id, column_id: res.column_id } : t));
+          const updated = prev.map(t => (t.id === tempId ? {
+            ...t,
+            id: res.id,
+            board_id: res.board_id,
+            column_id: res.column_id,
+            department_id: res.department_id || t.department_id,
+            team_id: res.team_id || t.team_id
+          } : t));
           try { localStorage.setItem('crosstech_tasks', JSON.stringify(updated)); } catch {}
           return updated;
         });

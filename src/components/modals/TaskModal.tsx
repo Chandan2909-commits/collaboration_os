@@ -12,6 +12,7 @@ export function TaskModal() {
     activeTaskForModal,
     setActiveTaskForModal,
     board,
+    boards,
     users,
     departments,
     teams,
@@ -36,6 +37,10 @@ export function TaskModal() {
   const [newComment, setNewComment] = useState('');
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
+  // Dynamically resolve target board for the selected team/dept so columns match
+  const targetBoard = boards.find(b => (teamId && b.team_id === teamId) || (b.department_id === departmentId && !b.team_id)) || board;
+  const availableColumns = targetBoard?.columns && targetBoard.columns.length > 0 ? targetBoard.columns : (board.columns || []);
+
   useEffect(() => {
     if (activeTaskForModal) {
       setTitle(activeTaskForModal.title);
@@ -55,13 +60,15 @@ export function TaskModal() {
       setDescription('');
       const defaultDept = currentUserMembership?.department_id || departments[0]?.id || '';
       setDepartmentId(defaultDept);
-      setTeamId(currentUserMembership?.team_id || '');
-      setColumnId(board.columns?.[0]?.id || 'col_backlog');
+      const defaultTeam = currentUserMembership?.team_id || (teams.find(t => t.department_id === defaultDept)?.id || '');
+      setTeamId(defaultTeam);
+      const matchedB = boards.find(b => (defaultTeam && b.team_id === defaultTeam) || (b.department_id === defaultDept && !b.team_id)) || board;
+      setColumnId(matchedB.columns?.[0]?.id || board.columns?.[0]?.id || 'col_backlog');
       setPriority('MEDIUM');
-      setAssignedTo(users[0]?.id || '');
+      setAssignedTo(currentUser.id || users[0]?.id || '');
       setDueDate('');
     }
-  }, [activeTaskForModal, board.columns, users, currentUserMembership, departments]);
+  }, [activeTaskForModal, board.columns, boards, users, currentUserMembership, departments, teams, currentUser.id]);
 
   if (!isTaskModalOpen) return null;
 
@@ -73,7 +80,7 @@ export function TaskModal() {
 
   const isDoneColumn =
     columnId === 'col_done' ||
-    Boolean(board.columns?.find(c => c.id === columnId && c.name.toLowerCase() === 'done'));
+    Boolean(availableColumns?.find(c => c.id === columnId && c.name.toLowerCase() === 'done'));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,10 +92,11 @@ export function TaskModal() {
         description: description.trim(),
         column_id: columnId,
         priority,
-        assigned_to: assignedTo || undefined,
+        assigned_to: assignedTo || currentUser.id || undefined,
         due_date: dueDate ? `${dueDate}T18:00:00Z` : undefined,
         department_id: departmentId || undefined,
-        team_id: teamId || undefined
+        team_id: teamId || undefined,
+        board_id: targetBoard?.id
       });
     } else {
       addTask({
@@ -96,10 +104,11 @@ export function TaskModal() {
         description: description.trim(),
         column_id: columnId,
         priority,
-        assigned_to: assignedTo || undefined,
+        assigned_to: assignedTo || currentUser.id || undefined,
         due_date: dueDate ? `${dueDate}T18:00:00Z` : undefined,
         department_id: departmentId || undefined,
-        team_id: teamId || undefined
+        team_id: teamId || undefined,
+        board_id: targetBoard?.id
       });
     }
 
@@ -180,7 +189,7 @@ export function TaskModal() {
                   value={columnId}
                   onChange={e => setColumnId(e.target.value)}
                 >
-                  {(board.columns || []).map(col => (
+                  {(availableColumns || []).map(col => (
                     <option key={col.id} value={col.id}>
                       {col.name}
                     </option>

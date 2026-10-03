@@ -52,30 +52,28 @@ function KanbanPageContent() {
   const userTeam = teams.find(t => t.id === userTeamId);
   const userDept = departments.find(d => d.id === userDeptId);
 
-  // Available teams for this user:
-  // Admin: all teams
-  // Dept Manager: teams in their department
-  // Team Member / Lead: their own team
-  const availableTeams = useMemo(() => {
-    if (isExecutive) return teams;
-    if (isDeptManager && userDeptId) return teams.filter(t => t.department_id === userDeptId);
-    if (userTeamId) return teams.filter(t => t.id === userTeamId);
-    return teams;
-  }, [isExecutive, isDeptManager, userDeptId, userTeamId, teams]);
-
-  // Initial team selection
-  const [selectedTeamId, setSelectedTeamId] = useState<string>(() => {
-    if (urlTeamId && teams.some(t => t.id === urlTeamId)) return urlTeamId;
-    if (isExecutive) return 'ALL';
-    if (isDeptManager) return 'ALL';
-    return userTeamId || (availableTeams[0]?.id || 'ALL');
-  });
-
-  // Department filter (mostly for executive view)
+  // Initial department selection:
+  // If URL query has deptId, use it.
+  // Otherwise if executive, default to 'ALL' (org-wide).
+  // Otherwise default to user's assigned department so they immediately see their department's board.
   const [selectedDeptId, setSelectedDeptId] = useState<string>(() => {
     if (urlDeptId && departments.some(d => d.id === urlDeptId)) return urlDeptId;
     if (isExecutive) return 'ALL';
-    return userDeptId || departments[0]?.id || 'ALL';
+    if (userDeptId && departments.some(d => d.id === userDeptId)) return userDeptId;
+    return 'ALL';
+  });
+
+  // Available teams for the currently selected department scope
+  const availableTeams = useMemo(() => {
+    if (selectedDeptId === 'ALL') return teams;
+    return teams.filter(t => t.department_id === selectedDeptId);
+  }, [selectedDeptId, teams]);
+
+  // Initial team selection: if member has a team in this department, default to it, otherwise 'ALL'
+  const [selectedTeamId, setSelectedTeamId] = useState<string>(() => {
+    if (urlTeamId && teams.some(t => t.id === urlTeamId)) return urlTeamId;
+    if (userTeamId && teams.some(t => t.id === userTeamId)) return userTeamId;
+    return 'ALL';
   });
 
   // Filters
@@ -95,25 +93,25 @@ function KanbanPageContent() {
   }, [urlTeamId, teams]);
 
   // Resolve active team and active department
-  const activeTeamId = isExecutive || isDeptManager ? selectedTeamId : (userTeamId || selectedTeamId);
+  const activeTeamId = selectedTeamId;
   const activeTeam = teams.find(t => t.id === activeTeamId);
-
-  const activeDeptId = isExecutive
-    ? selectedDeptId
-    : isDeptManager
-      ? (userDeptId || 'ALL')
-      : (activeTeam?.department_id || userDeptId || 'ALL');
+  const activeDeptId = selectedDeptId;
 
   // Find active board
   const activeBoard = useMemo(() => {
-    if (activeTeamId !== 'ALL') {
-      const found = boards.find(b => b.team_id === activeTeamId);
-      if (found) return found;
+    // 1. If viewing specific team
+    if (activeTeamId !== 'ALL' && activeTeamId !== 'MY_TASKS') {
+      const foundTeamBoard = boards.find(b => b.team_id === activeTeamId);
+      if (foundTeamBoard) return foundTeamBoard;
     }
+    // 2. If viewing specific department
     if (activeDeptId !== 'ALL') {
-      const found = boards.find(b => b.department_id === activeDeptId && !b.team_id);
-      if (found) return found;
+      const foundDeptBoard = boards.find(b => b.department_id === activeDeptId && !b.team_id);
+      if (foundDeptBoard) return foundDeptBoard;
+      const anyDeptBoard = boards.find(b => b.department_id === activeDeptId);
+      if (anyDeptBoard) return anyDeptBoard;
     }
+    // 3. Fallback: primary organization board
     return board || boards[0];
   }, [activeTeamId, activeDeptId, boards, board]);
 
@@ -127,12 +125,54 @@ function KanbanPageContent() {
     return DEFAULT_BOARD_COLUMNS;
   }, [activeBoard, board]);
 
-  // Column matching helper (robust to ID/slug variations)
-  const isTaskInColumn = (task: Task, col: BoardColumn): boolean => {
+  // Robust column matching helper (supports UUIDs, slugs, custom board column variations)
+  const normalizeColSlug = (str?: string): string => {
+    if (!str) return '';
+    const clean = str.toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '');
+    if (clean === 'todo' || clean === 'todos' || clean === 'to_do') return 'todo';
+    if (clean === 'inreview' || clean === 'review' || clean === 'underreview') return 'review';
+    if (clean === 'inprogress' || clean === 'progress' || clean === 'doing' || clean === 'active') return 'inprogress';
+    if (clean === 'backlog') return 'backlog';
+    if (clean === 'done' || clean === 'completed' || clean === 'finished' || clean === 'closed') return 'done';
+    return clean;
+  };
+
+  const getTaskColSlug = (task: Task): string => {
+    if (!task.column_id) return 'backlog';
+    const directSlug = normalizeColSlug(task.column_id);
+    if (['backlog', 'todo', 'inprogress', 'review', 'done'].includes(directSlug)) {
+      return directSlug;
+    }
+    // Search across all boards to see if task.column_id matches any column ID
+    for (const b of boards) {
+      const found = (b.columns || []).find(c => c.id === task.column_id);
+      if (found) {
+        const foundSlug = normalizeColSlug(found.name) || normalizeColSlug(found.id);
+        if (foundSlug) return foundSlug;
+      }
+    }
+    return directSlug;
+  };
+
+  const isTaskInColumn = (task: Task, col: BoardColumn, colIdx?: number, allCols?: BoardColumn[]): boolean => {
+    // 1. Exact ID match
     if (task.column_id === col.id) return true;
-    const colSlug = col.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const taskColSlug = (task.column_id || '').toLowerCase().replace(/^col_/, '').replace(/[^a-z0-9]/g, '_');
-    if (colSlug === taskColSlug || `col_${colSlug}` === task.column_id?.toLowerCase()) return true;
+
+    // 2. Normalized slug match
+    const colSlug = normalizeColSlug(col.name) || normalizeColSlug(col.id);
+    const taskSlug = getTaskColSlug(task);
+    if (colSlug && taskSlug && colSlug === taskSlug) return true;
+
+    // 3. Fallback: If task doesn't match any known column on the board, keep it in column 0 (Backlog)
+    // so that NO created card is EVER invisible or dropped
+    if (allCols && allCols.length > 0 && colIdx === 0) {
+      const matchesAny = allCols.some(c => {
+        if (task.column_id === c.id) return true;
+        const cSlug = normalizeColSlug(c.name) || normalizeColSlug(c.id);
+        return cSlug && taskSlug && cSlug === taskSlug;
+      });
+      if (!matchesAny) return true;
+    }
     return false;
   };
 
@@ -140,18 +180,29 @@ function KanbanPageContent() {
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
       // 1. Team Scoping
-      if (activeTeamId !== 'ALL') {
+      if (activeTeamId === 'MY_TASKS') {
+        const isMine = t.assigned_to === currentUser.id || t.created_by === currentUser.id;
+        if (!isMine) return false;
+      } else if (activeTeamId !== 'ALL') {
         const matchesTeam = t.team_id === activeTeamId;
         const matchesBoard = activeBoard && t.board_id === activeBoard.id;
-        if (!matchesTeam && !matchesBoard) return false;
-      } else if (!isExecutive && !isDeptManager && userTeamId) {
-        // Non-executives are strictly scoped to their team if assigned
-        if (t.team_id && t.team_id !== userTeamId) return false;
-      }
+        // Always show cards created by or assigned to the current user when viewing their own team
+        const isMineInMyTeam = userTeamId && activeTeamId === userTeamId && (t.created_by === currentUser.id || t.assigned_to === currentUser.id);
 
-      // 2. Department Scoping
-      if (activeDeptId !== 'ALL') {
-        if (t.department_id && t.department_id !== activeDeptId) return false;
+        if (!matchesTeam && !matchesBoard && !isMineInMyTeam) {
+          return false;
+        }
+      } else if (activeDeptId !== 'ALL') {
+        // 2. Department Scoping (when a specific department is selected)
+        const matchesDept = t.department_id === activeDeptId;
+        const matchesBoard = activeBoard && t.board_id === activeBoard.id;
+        const matchesDeptTeam = teams.some(tm => tm.id === t.team_id && tm.department_id === activeDeptId);
+        const matchesDeptBoard = boards.some(b => b.id === t.board_id && b.department_id === activeDeptId);
+        const isMineInDept = userDeptId && activeDeptId === userDeptId && (t.created_by === currentUser.id || t.assigned_to === currentUser.id);
+
+        if (!matchesDept && !matchesBoard && !matchesDeptTeam && !matchesDeptBoard && !isMineInDept) {
+          return false;
+        }
       }
 
       // 3. Priority Filter
@@ -170,7 +221,7 @@ function KanbanPageContent() {
 
       return true;
     });
-  }, [tasks, activeTeamId, activeBoard, isExecutive, isDeptManager, userTeamId, activeDeptId, filterPriority, filterAssignee, searchQuery]);
+  }, [tasks, activeTeamId, activeDeptId, activeBoard, userTeamId, userDeptId, teams, boards, filterPriority, filterAssignee, searchQuery, currentUser.id]);
 
   const priorityStyles: Record<TaskPriority, { bg: string; color: string; border: string; label: string }> = {
     URGENT: { bg: '#fee2e2', color: '#b91c1c', border: '#fecaca', label: 'Urgent' },
@@ -204,21 +255,26 @@ function KanbanPageContent() {
   const completedCount = useMemo(() => {
     const doneCol = columns.find(c => c.name.toLowerCase() === 'done');
     if (!doneCol) return 0;
-    return filteredTasks.filter(t => isTaskInColumn(t, doneCol)).length;
+    return filteredTasks.filter(t => isTaskInColumn(t, doneCol, columns.indexOf(doneCol), columns)).length;
   }, [columns, filteredTasks]);
 
-  // Dynamic Page Title
-  const pageTitle = activeTeam
-    ? `${activeTeam.name} Kanban Board`
-    : activeDeptId !== 'ALL'
-      ? `${departments.find(d => d.id === activeDeptId)?.name || 'Department'} Sprint Board`
-      : 'All Teams Kanban Board';
+  // Dynamic Page Title & Description
+  const activeDept = departments.find(d => d.id === activeDeptId);
+  const pageTitle = activeTeamId === 'MY_TASKS'
+    ? 'My Deliverables (Created & Assigned)'
+    : activeTeam
+      ? `${activeTeam.name} Sprint Board`
+      : activeDeptId !== 'ALL'
+        ? `${activeDept?.name || 'Department'} Board`
+        : 'Organization-wide Kanban Board';
 
-  const pageDescription = activeTeam
-    ? `Dedicated agile workflow for ${activeTeam.name}. Tasks remain permanently preserved on the board until deleted.`
-    : isExecutive
-      ? 'Executive multi-team overview. Super Owners and Admins can inspect and manage all team boards across the organization.'
-      : 'Agile sprint execution engine with fractional drag-and-drop column sorting and persistent task retention.';
+  const pageDescription = activeTeamId === 'MY_TASKS'
+    ? 'Direct sprint deliverables created by or assigned to your account. Move states as you progress.'
+    : activeTeam
+      ? `Dedicated agile sprint board for ${activeTeam.name}. Tasks remain permanently preserved on the board until deleted.`
+      : activeDeptId !== 'ALL'
+        ? `Dedicated sprint board for ${activeDept?.name || 'Department'}. Tasks remain permanently preserved on the board until deleted.`
+        : 'Multi-department collaborative sprint execution engine with persistent task retention across the organization.';
 
   return (
     <div className="animate-page-enter" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -237,201 +293,176 @@ function KanbanPageContent() {
         }}
       />
 
-      {/* Role-Based Scope & Team Switcher */}
-      {isExecutive ? (
-        <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {/* Executive Header & Department Filter */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* Role-Based Scope & Department/Team Switcher */}
+      <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {/* Header Row: Role Context & Department Dropdown */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isExecutive ? (
               <Sparkles style={{ width: 16, height: 16, color: '#1d4ed8' }} />
-              <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#0f172a' }}>
-                Executive Board Oversight (All Teams Accessible)
-              </span>
-            </div>
-
-            {/* Department Dropdown for Admin */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Building2 style={{ width: 14, height: 14, color: '#64748b' }} />
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b' }}>Department:</span>
-              <select
-                className="settings-input"
-                style={{ height: '32px', fontSize: '0.75rem', width: 'auto', padding: '0 8px' }}
-                value={selectedDeptId}
-                onChange={e => setSelectedDeptId(e.target.value)}
-              >
-                <option value="ALL">All Departments</option>
-                {departments.map(d => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            ) : isDeptManager ? (
+              <Building2 style={{ width: 16, height: 16, color: '#7c3aed' }} />
+            ) : (
+              <Shield style={{ width: 16, height: 16, color: '#1d4ed8' }} />
+            )}
+            <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#0f172a' }}>
+              {isExecutive
+                ? 'Executive Board Oversight (All Departments & Teams Accessible)'
+                : isDeptManager
+                  ? `Department Manager Workspace: ${userDept?.name || 'Department'}`
+                  : `Team Workspace: ${departments.find(d => d.id === activeDeptId)?.name || userDept?.name || 'Sprint Execution'}`}
+            </span>
           </div>
 
-          {/* Team Tabs Switcher */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
-            <button
-              type="button"
-              onClick={() => setSelectedTeamId('ALL')}
+          {/* Department Selector Dropdown (Interactive for ALL users) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Building2 style={{ width: 14, height: 14, color: '#64748b' }} />
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b' }}>Department Board:</span>
+            <select
+              className="settings-input"
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 14px',
-                borderRadius: '9999px',
+                height: '32px',
                 fontSize: '0.75rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                border: selectedTeamId === 'ALL' ? '1px solid #1e1e1e' : '1px solid #e2e8f0',
-                background: selectedTeamId === 'ALL' ? '#1e1e1e' : '#ffffff',
-                color: selectedTeamId === 'ALL' ? '#ffffff' : '#475569',
-                transition: 'all 0.15s ease'
+                width: 'auto',
+                minWidth: '200px',
+                padding: '0 10px',
+                borderRadius: '8px',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+              value={selectedDeptId}
+              onChange={e => {
+                const newDeptId = e.target.value;
+                setSelectedDeptId(newDeptId);
+                setSelectedTeamId('ALL');
               }}
             >
-              <span>🌟 All Teams Overview</span>
-              <span style={{ opacity: 0.8, fontSize: '0.6875rem' }}>({tasks.length})</span>
-            </button>
-
-            {availableTeams
-              .filter(t => selectedDeptId === 'ALL' || t.department_id === selectedDeptId)
-              .map(team => {
-                const isSelected = selectedTeamId === team.id;
-                const teamTasksCount = tasks.filter(t => t.team_id === team.id).length;
-                return (
-                  <button
-                    key={team.id}
-                    type="button"
-                    onClick={() => setSelectedTeamId(team.id)}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '6px 14px',
-                      borderRadius: '9999px',
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      border: isSelected ? '1px solid #1d4ed8' : '1px solid #e2e8f0',
-                      background: isSelected ? '#1d4ed8' : '#ffffff',
-                      color: isSelected ? '#ffffff' : '#475569',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    <UsersRound style={{ width: 13, height: 13 }} />
-                    <span>{team.name}</span>
-                    <span
-                      style={{
-                        padding: '1px 6px',
-                        borderRadius: '9999px',
-                        background: isSelected ? '#3b82f6' : '#f1f5f9',
-                        color: isSelected ? '#ffffff' : '#64748b',
-                        fontSize: '0.6875rem'
-                      }}
-                    >
-                      {teamTasksCount}
-                    </span>
-                  </button>
-                );
-              })}
+              <option value="ALL">🌟 All Departments (Org-wide)</option>
+              {departments.map(d => (
+                <option key={d.id} value={d.id}>
+                  {d.name} {d.id === userDeptId ? '• (My Department)' : ''}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
-      ) : isDeptManager ? (
-        <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem', color: '#0f172a', fontWeight: 700 }}>
-              <Building2 style={{ width: 16, height: 16, color: '#7c3aed' }} />
-              <span>Department Manager View: {userDept?.name || 'Department'}</span>
-            </div>
-          </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
-            <button
-              type="button"
-              onClick={() => setSelectedTeamId('ALL')}
+        {/* Horizontal Tabs: Department Board, Teams, My Tasks */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+          {/* Main Scope / All Tasks Tab */}
+          <button
+            type="button"
+            onClick={() => setSelectedTeamId('ALL')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '9999px',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              border: selectedTeamId === 'ALL' ? '1px solid #1e1e1e' : '1px solid #e2e8f0',
+              background: selectedTeamId === 'ALL' ? '#1e1e1e' : '#ffffff',
+              color: selectedTeamId === 'ALL' ? '#ffffff' : '#475569',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span>{selectedDeptId === 'ALL' ? '🌟 All Teams & General Board' : `🏢 ${departments.find(d => d.id === selectedDeptId)?.name || 'Department'} Board`}</span>
+            <span
               style={{
-                padding: '6px 14px',
+                padding: '1px 6px',
                 borderRadius: '9999px',
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: selectedTeamId === 'ALL' ? '1px solid #7c3aed' : '1px solid #e2e8f0',
-                background: selectedTeamId === 'ALL' ? '#7c3aed' : '#ffffff',
-                color: selectedTeamId === 'ALL' ? '#ffffff' : '#475569'
+                background: selectedTeamId === 'ALL' ? '#404040' : '#f1f5f9',
+                color: selectedTeamId === 'ALL' ? '#ffffff' : '#64748b',
+                fontSize: '0.6875rem'
               }}
             >
-              All Department Teams
-            </button>
-            {availableTeams.map(team => {
-              const isSelected = selectedTeamId === team.id;
-              const count = tasks.filter(t => t.team_id === team.id).length;
-              return (
-                <button
-                  key={team.id}
-                  type="button"
-                  onClick={() => setSelectedTeamId(team.id)}
+              {filteredTasks.length}
+            </span>
+          </button>
+
+          {/* Teams Tabs */}
+          {availableTeams.map(team => {
+            const isSelected = selectedTeamId === team.id;
+            const teamTasksCount = tasks.filter(t => t.team_id === team.id || (activeBoard && t.board_id === activeBoard.id && t.team_id === team.id)).length;
+            const isMyTeam = userTeamId && team.id === userTeamId;
+
+            return (
+              <button
+                key={team.id}
+                type="button"
+                onClick={() => setSelectedTeamId(team.id)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 14px',
+                  borderRadius: '9999px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  border: isSelected ? '1px solid #1d4ed8' : '1px solid #e2e8f0',
+                  background: isSelected ? '#1d4ed8' : '#ffffff',
+                  color: isSelected ? '#ffffff' : '#475569',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <UsersRound style={{ width: 13, height: 13 }} />
+                <span>{team.name} {isMyTeam ? '(My Team)' : ''}</span>
+                <span
                   style={{
-                    padding: '6px 14px',
+                    padding: '1px 6px',
                     borderRadius: '9999px',
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    border: isSelected ? '1px solid #7c3aed' : '1px solid #e2e8f0',
-                    background: isSelected ? '#7c3aed' : '#ffffff',
-                    color: isSelected ? '#ffffff' : '#475569'
+                    background: isSelected ? '#3b82f6' : '#f1f5f9',
+                    color: isSelected ? '#ffffff' : '#64748b',
+                    fontSize: '0.6875rem'
                   }}
                 >
-                  {team.name} ({count})
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '12px',
-            padding: '12px 18px',
-            background: '#f8fafc',
-            border: '1px solid #e2e8f0',
-            borderRadius: '12px',
-            color: '#334155',
-            flexWrap: 'wrap'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Shield style={{ width: 18, height: 18, color: '#1d4ed8', flexShrink: 0 }} />
-            <div style={{ fontSize: '0.8125rem' }}>
-              <strong>Team Kanban Board:</strong> Viewing tasks scoped to{' '}
-              <strong>{userTeam?.name || userDept?.name || 'Your Team'}</strong>.
-              Completed tasks stay on the board permanently until deleted.
-            </div>
-          </div>
+                  {teamTasksCount}
+                </span>
+              </button>
+            );
+          })}
 
-          {availableTeams.length > 1 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Switch Team:</span>
-              <select
-                className="settings-input"
-                style={{ height: '30px', fontSize: '0.75rem', padding: '0 8px', width: 'auto' }}
-                value={selectedTeamId}
-                onChange={e => setSelectedTeamId(e.target.value)}
-              >
-                {availableTeams.map(t => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          {/* My Deliverables Tab */}
+          <button
+            type="button"
+            onClick={() => setSelectedTeamId('MY_TASKS')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '9999px',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              border: selectedTeamId === 'MY_TASKS' ? '1px solid #059669' : '1px solid #e2e8f0',
+              background: selectedTeamId === 'MY_TASKS' ? '#059669' : '#ffffff',
+              color: selectedTeamId === 'MY_TASKS' ? '#ffffff' : '#475569',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <CheckCircle2 style={{ width: 13, height: 13 }} />
+            <span>Created & Assigned To Me</span>
+            <span
+              style={{
+                padding: '1px 6px',
+                borderRadius: '9999px',
+                background: selectedTeamId === 'MY_TASKS' ? '#10b981' : '#f1f5f9',
+                color: selectedTeamId === 'MY_TASKS' ? '#ffffff' : '#64748b',
+                fontSize: '0.6875rem'
+              }}
+            >
+              {tasks.filter(t => t.assigned_to === currentUser.id || t.created_by === currentUser.id).length}
+            </span>
+          </button>
         </div>
-      )}
+      </div>
 
       {/* Filter & Search Toolbar */}
       <div
@@ -525,7 +556,7 @@ function KanbanPageContent() {
         }}
       >
         {columns.map((col, colIdx) => {
-          const colTasks = filteredTasks.filter(t => isTaskInColumn(t, col));
+          const colTasks = filteredTasks.filter(t => isTaskInColumn(t, col, colIdx, columns));
           const isOverWip = col.wip_limit && col.wip_limit > 0 && colTasks.length > col.wip_limit;
           const isDoneCol = col.name.toLowerCase() === 'done';
 
